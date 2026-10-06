@@ -3,9 +3,10 @@ package com.example.data.local
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "cart_items")
+@Entity(tableName = "cart_items", primaryKeys = ["userId", "foodId"])
 data class CartItemEntity(
-    @PrimaryKey val foodId: String,
+    val userId: String,
+    val foodId: String,
     val cookId: String,
     val cookName: String,
     val title: String,
@@ -16,9 +17,10 @@ data class CartItemEntity(
     val specialRequest: String
 )
 
-@Entity(tableName = "favorites")
+@Entity(tableName = "favorites", primaryKeys = ["userId", "foodId"])
 data class FavoriteEntity(
-    @PrimaryKey val foodId: String
+    val userId: String,
+    val foodId: String
 )
 
 @Entity(tableName = "user_profile")

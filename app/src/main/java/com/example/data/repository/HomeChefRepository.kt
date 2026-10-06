@@ -226,26 +226,36 @@ class HomeChefRepository(context: Context) {
     )
     val foods: StateFlow<List<Food>> = _foods.asStateFlow()
 
-    // Favorites from Room
-    val favoriteFoodIds: StateFlow<List<String>> = db.favoriteDao().getFavoriteFoodIds()
+    // Favorites — scoped to the currently logged-in user
+    val favoriteFoodIds: StateFlow<List<String>> = _currentUser
+        .flatMapLatest { user ->
+            if (user != null) db.favoriteDao().getFavoriteFoodIds(user.userId)
+            else kotlinx.coroutines.flow.flowOf(emptyList())
+        }
         .stateIn(scope, SharingStarted.Lazily, emptyList())
 
-    // Cart Items from Room
-    val cartItems: StateFlow<List<CartItem>> = db.cartDao().getAllCartItems().map { list ->
-        list.map {
-            CartItem(
-                foodId         = it.foodId,
-                cookId         = it.cookId,
-                cookName       = it.cookName,
-                title          = it.title,
-                description    = it.description,
-                price          = it.price,
-                imageUrl       = it.imageUrl,
-                quantity       = it.quantity,
-                specialRequest = it.specialRequest
-            )
+    // Cart Items from Room — scoped to the currently logged-in user
+    val cartItems: StateFlow<List<CartItem>> = _currentUser
+        .flatMapLatest { user ->
+            if (user != null) {
+                db.cartDao().getAllCartItems(user.userId).map { list ->
+                    list.map {
+                        CartItem(
+                            foodId         = it.foodId,
+                            cookId         = it.cookId,
+                            cookName       = it.cookName,
+                            title          = it.title,
+                            description    = it.description,
+                            price          = it.price,
+                            imageUrl       = it.imageUrl,
+                            quantity       = it.quantity,
+                            specialRequest = it.specialRequest
+                        )
+                    }
+                }
+            } else kotlinx.coroutines.flow.flowOf(emptyList())
         }
-    }.stateIn(scope, SharingStarted.Lazily, emptyList())
+        .stateIn(scope, SharingStarted.Lazily, emptyList())
 
     // Orders state (in-memory, demo orders)
     private val _orders = MutableStateFlow<List<Order>>(emptyList())
@@ -282,22 +292,25 @@ class HomeChefRepository(context: Context) {
 
     // ─── Favorites ────────────────────────────────────────────────────────────
     fun toggleFavorite(foodId: String) {
+        val userId = _currentUser.value?.userId ?: return
         scope.launch {
             val isFav = favoriteFoodIds.value.contains(foodId)
             if (isFav) {
-                db.favoriteDao().removeFavorite(foodId)
+                db.favoriteDao().removeFavorite(userId, foodId)
             } else {
-                db.favoriteDao().addFavorite(FavoriteEntity(foodId))
+                db.favoriteDao().addFavorite(FavoriteEntity(userId, foodId))
             }
         }
     }
 
     // ─── Cart ─────────────────────────────────────────────────────────────────
     fun addToCart(food: Food, quantity: Int = 1, specialRequest: String = "") {
+        val userId = _currentUser.value?.userId ?: return
         scope.launch {
             val existing = cartItems.value.find { it.foodId == food.foodId }
             val newQty   = (existing?.quantity ?: 0) + quantity
             val item = CartItemEntity(
+                userId         = userId,
                 foodId         = food.foodId,
                 cookId         = food.cookId,
                 cookName       = food.cookName,
@@ -313,14 +326,15 @@ class HomeChefRepository(context: Context) {
     }
 
     fun updateCartQuantity(foodId: String, newQty: Int) {
+        val userId = _currentUser.value?.userId ?: return
         scope.launch {
             if (newQty <= 0) {
-                db.cartDao().deleteByFoodId(foodId)
+                db.cartDao().deleteByFoodId(userId, foodId)
             } else {
                 val item = cartItems.value.find { it.foodId == foodId }
                 item?.let {
                     db.cartDao().insertOrUpdate(
-                        CartItemEntity(it.foodId, it.cookId, it.cookName, it.title, it.description, it.price, it.imageUrl, newQty, it.specialRequest)
+                        CartItemEntity(userId, it.foodId, it.cookId, it.cookName, it.title, it.description, it.price, it.imageUrl, newQty, it.specialRequest)
                     )
                 }
             }
@@ -328,11 +342,13 @@ class HomeChefRepository(context: Context) {
     }
 
     fun removeCartItem(foodId: String) {
-        scope.launch { db.cartDao().deleteByFoodId(foodId) }
+        val userId = _currentUser.value?.userId ?: return
+        scope.launch { db.cartDao().deleteByFoodId(userId, foodId) }
     }
 
     fun clearCart() {
-        scope.launch { db.cartDao().clearCart() }
+        val userId = _currentUser.value?.userId ?: return
+        scope.launch { db.cartDao().clearCart(userId) }
     }
 
     // ─── Orders ───────────────────────────────────────────────────────────────

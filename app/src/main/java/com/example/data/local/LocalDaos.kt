@@ -5,29 +5,29 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface CartDao {
-    @Query("SELECT * FROM cart_items")
-    fun getAllCartItems(): Flow<List<CartItemEntity>>
+    @Query("SELECT * FROM cart_items WHERE userId = :userId")
+    fun getAllCartItems(userId: String): Flow<List<CartItemEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdate(item: CartItemEntity)
 
-    @Query("DELETE FROM cart_items WHERE foodId = :foodId")
-    suspend fun deleteByFoodId(foodId: String)
+    @Query("DELETE FROM cart_items WHERE userId = :userId AND foodId = :foodId")
+    suspend fun deleteByFoodId(userId: String, foodId: String)
 
-    @Query("DELETE FROM cart_items")
-    suspend fun clearCart()
+    @Query("DELETE FROM cart_items WHERE userId = :userId")
+    suspend fun clearCart(userId: String)
 }
 
 @Dao
 interface FavoriteDao {
-    @Query("SELECT foodId FROM favorites")
-    fun getFavoriteFoodIds(): Flow<List<String>>
+    @Query("SELECT foodId FROM favorites WHERE userId = :userId")
+    fun getFavoriteFoodIds(userId: String): Flow<List<String>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun addFavorite(favorite: FavoriteEntity)
 
-    @Query("DELETE FROM favorites WHERE foodId = :foodId")
-    suspend fun removeFavorite(foodId: String)
+    @Query("DELETE FROM favorites WHERE userId = :userId AND foodId = :foodId")
+    suspend fun removeFavorite(userId: String, foodId: String)
 }
 
 @Dao

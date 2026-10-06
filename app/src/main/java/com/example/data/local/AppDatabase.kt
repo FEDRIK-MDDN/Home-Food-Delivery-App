@@ -26,7 +26,7 @@ private fun sha256(input: String): String {
         UserProfileEntity::class,
         UserEntity::class
     ],
-    version = 2,           // bumped from 1 → 2 for new users table
+    version = 4,           // bumped from 3 → 4 for per-user cart items
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
