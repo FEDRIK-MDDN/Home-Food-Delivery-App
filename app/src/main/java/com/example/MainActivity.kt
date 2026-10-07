@@ -52,6 +52,25 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
         foods.filter { favoriteFoodIds.contains(it.foodId) && it.isAvailable }
     }
 
+    // ── Reactive navigation: fires whenever currentUser changes ──────────────
+    LaunchedEffect(currentUser) {
+        when {
+            // Just logged in / registered → go to role dashboard
+            currentUser != null && currentScreen == "auth" -> {
+                when (currentUser!!.role) {
+                    UserRole.CUSTOMER -> viewModel.navigateTo("customer_home")
+                    UserRole.COOK     -> viewModel.navigateTo("cook_dashboard")
+                    UserRole.DELIVERY -> viewModel.navigateTo("delivery_dashboard")
+                    UserRole.ADMIN    -> viewModel.navigateTo("admin_dashboard")
+                }
+            }
+            // Logged out → go to auth
+            currentUser == null && currentScreen !in setOf("auth", "splash") -> {
+                viewModel.navigateTo("auth")
+            }
+        }
+    }
+
     val screensWithNav = setOf(
         "customer_home", "favorites", "cart", "orders", "profile",
         "chef_ai", "cook_dashboard", "delivery_dashboard", "admin_dashboard"
@@ -100,7 +119,7 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
                         onOpenAiRecommendation = { },
                         onOpenNotifications    = { }
                     )
-                } ?: viewModel.navigateTo("auth")
+                }
 
                 "favorites" -> FavoritesScreen(
                     favoriteFoods = favoriteFoods,

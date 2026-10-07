@@ -12,6 +12,11 @@ class HomeChefViewModel(application: Application) : AndroidViewModel(application
 
     val repository = HomeChefRepository(application)
 
+    init {
+        // Seed default foods to Firestore if it's a fresh project
+        repository.seedDefaultFoodsIfEmpty()
+    }
+
     // User state — null = not logged in
     val currentUser = repository.currentUser
     val users       = repository.users

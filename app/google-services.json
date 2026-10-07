@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "312120666070",
+    "project_id": "home-food-delivery-app-edd4c",
+    "storage_bucket": "home-food-delivery-app-edd4c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:312120666070:android:14e38c66cc13cc767fe677",
+        "android_client_info": {
+          "package_name": "com.aistudio.homechefconnect.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAq_veL7jQKBmFoLnJGNgKGxOQkAoATW3Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

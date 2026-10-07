@@ -5,6 +5,12 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -46,11 +52,33 @@ fun ProfileScreen(
     onNavigateToOrders: () -> Unit,
     onLogout: () -> Unit
 ) {
+    val context   = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        uri?.let {
-            onUpdatePhoto(it.toString())
+        uri?.let { sourceUri ->
+            coroutineScope.launch {
+                // Copy image to internal storage so it persists across app restarts
+                val savedPath = withContext(Dispatchers.IO) {
+                    try {
+                        val inputStream = context.contentResolver.openInputStream(sourceUri)
+                            ?: return@withContext null
+                        val dir  = File(context.filesDir, "profile_photos")
+                        dir.mkdirs()
+                        val file = File(dir, "profile_${user.userId}.jpg")
+                        FileOutputStream(file).use { out -> inputStream.copyTo(out) }
+                        inputStream.close()
+                        file.absolutePath // permanent internal path
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+                if (savedPath != null) {
+                    onUpdatePhoto(savedPath)
+                }
+            }
         }
     }
     var showEditDialog by remember { mutableStateOf(false) }
@@ -158,7 +186,7 @@ fun ProfileScreen(
                         ) {
                             if (user.photoUrl.isNotBlank()) {
                                 AsyncImage(
-                                    model = user.photoUrl,
+                                    model = if (user.photoUrl.startsWith("http")) user.photoUrl else java.io.File(user.photoUrl),
                                     contentDescription = "Profile Picture (Tap to view)",
                                     modifier = Modifier
                                         .size(94.dp)
@@ -532,7 +560,7 @@ fun ProfileScreen(
                         ) {
                             if (user.photoUrl.isNotBlank()) {
                                 AsyncImage(
-                                    model = user.photoUrl,
+                                    model = if (user.photoUrl.startsWith("http")) user.photoUrl else java.io.File(user.photoUrl),
                                     contentDescription = "Current Photo",
                                     modifier = Modifier
                                         .size(54.dp)
@@ -996,7 +1024,7 @@ fun ProfileScreen(
                     Spacer(Modifier.height(4.dp))
                     if (user.photoUrl.isNotBlank()) {
                         AsyncImage(
-                            model = user.photoUrl,
+                            model = if (user.photoUrl.startsWith("http")) user.photoUrl else java.io.File(user.photoUrl),
                             contentDescription = "Profile Picture Full View",
                             modifier = Modifier
                                 .size(240.dp)
