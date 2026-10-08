@@ -10,7 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -19,8 +19,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.CartItem
 import com.example.data.model.Order
 import com.example.data.model.OrderStatus
+import com.example.ui.components.CustomerDeleteOrderDialog
+import com.example.ui.components.CustomerEditOrderDialog
 import com.example.ui.theme.GreenContainer
 import com.example.ui.theme.GreenPrimary
 
@@ -28,8 +31,12 @@ import com.example.ui.theme.GreenPrimary
 @Composable
 fun OrderTrackingScreen(
     order: Order,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    onUpdateOrder: (orderId: String, deliveryAddress: String, phone: String, notes: String, items: List<CartItem>, onResult: (String?) -> Unit) -> Unit = { _, _, _, _, _, _ -> },
+    onDeleteOrder: (orderId: String, onResult: (String?) -> Unit) -> Unit = { _, _ -> }
 ) {
+    var showEditDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
     // Bug 7 fix: All OrderStatus values are represented so the tracker never
     // silently snaps back to step 0 for PICKED_UP or COMPLETED orders.
     val steps = listOf(
@@ -115,6 +122,89 @@ fun OrderTrackingScreen(
                             fontSize = 13.sp,
                             color = Color.White.copy(alpha = 0.85f)
                         )
+                    }
+                }
+            }
+
+            // Customer Actions Card (Before cook accepts order)
+            if (order.status == OrderStatus.PENDING) {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFEF3C7)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.HourglassTop,
+                                    contentDescription = null,
+                                    tint = Color(0xFFD97706),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Pending Cook Acceptance",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = Color(0xFF0F172A)
+                                )
+                                Text(
+                                    text = "You can update delivery address, notes, items or cancel/delete this order before the chef starts cooking.",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF64748B)
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            FilledTonalButton(
+                                onClick = { showEditDialog = true },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = GreenContainer,
+                                    contentColor = GreenPrimary
+                                ),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Update Order", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+
+                            OutlinedButton(
+                                onClick = { showDeleteDialog = true },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = Color(0xFFDC2626)
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Delete Order", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                        }
                     }
                 }
             }
@@ -284,6 +374,31 @@ fun OrderTrackingScreen(
                 }
             }
         }
+    }
+
+    if (showEditDialog) {
+        CustomerEditOrderDialog(
+            order = order,
+            onDismiss = { showEditDialog = false },
+            onSave = { orderId, addr, phone, notes, items, onResult ->
+                onUpdateOrder(orderId, addr, phone, notes, items, onResult)
+            }
+        )
+    }
+
+    if (showDeleteDialog) {
+        CustomerDeleteOrderDialog(
+            order = order,
+            onDismiss = { showDeleteDialog = false },
+            onConfirmDelete = { orderId, onResult ->
+                onDeleteOrder(orderId) { err ->
+                    onResult(err)
+                    if (err == null) {
+                        onBackClick()
+                    }
+                }
+            }
+        )
     }
 }
 

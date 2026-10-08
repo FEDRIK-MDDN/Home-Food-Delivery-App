@@ -10,6 +10,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,10 +22,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.CartItem
 import com.example.data.model.Order
 import com.example.data.model.OrderStatus
 import com.example.data.model.User
 import com.example.data.model.UserRole
+import com.example.ui.components.CustomerDeleteOrderDialog
+import com.example.ui.components.CustomerEditOrderDialog
 import com.example.ui.theme.GreenContainer
 import com.example.ui.theme.GreenPrimary
 import java.text.SimpleDateFormat
@@ -35,7 +40,9 @@ import java.util.Locale
 fun OrdersScreen(
     orders: List<Order>,
     currentUser: User,
-    onOrderClick: (Order) -> Unit
+    onOrderClick: (Order) -> Unit,
+    onUpdateOrder: (orderId: String, deliveryAddress: String, phone: String, notes: String, items: List<CartItem>, onResult: (String?) -> Unit) -> Unit = { _, _, _, _, _, _ -> },
+    onDeleteOrder: (orderId: String, onResult: (String?) -> Unit) -> Unit = { _, _ -> }
 ) {
     // ── Role-based tab definitions ─────────────────────────────────────────────
     // Each role sees different filter tabs that match their workflow.
@@ -47,6 +54,8 @@ fun OrdersScreen(
     }
 
     var selectedTab by remember { mutableStateOf(tabs.first()) }
+    var orderToEdit by remember { mutableStateOf<Order?>(null) }
+    var orderToDelete by remember { mutableStateOf<Order?>(null) }
 
     // ── Role-based pre-filter: only show orders relevant to this user ───────────
     val roleFilteredOrders = remember(orders, currentUser) {
@@ -215,7 +224,9 @@ fun OrdersScreen(
                         OrderItemCard(
                             order = order,
                             currentUserRole = currentUser.role,
-                            onClick = { onOrderClick(order) }
+                            onClick = { onOrderClick(order) },
+                            onEditClick = { orderToEdit = order },
+                            onDeleteClick = { orderToDelete = order }
                         )
                     }
                     item {
@@ -225,13 +236,35 @@ fun OrdersScreen(
             }
         }
     }
+
+    orderToEdit?.let { ord ->
+        CustomerEditOrderDialog(
+            order = ord,
+            onDismiss = { orderToEdit = null },
+            onSave = { orderId, addr, phone, notes, items, onResult ->
+                onUpdateOrder(orderId, addr, phone, notes, items, onResult)
+            }
+        )
+    }
+
+    orderToDelete?.let { ord ->
+        CustomerDeleteOrderDialog(
+            order = ord,
+            onDismiss = { orderToDelete = null },
+            onConfirmDelete = { orderId, onResult ->
+                onDeleteOrder(orderId, onResult)
+            }
+        )
+    }
 }
 
 @Composable
 fun OrderItemCard(
     order: Order,
     currentUserRole: UserRole = UserRole.CUSTOMER,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onEditClick: () -> Unit = {},
+    onDeleteClick: () -> Unit = {}
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM dd, yyyy • hh:mm a", Locale.getDefault()) }
     val formattedDate = remember(order.createdAt) { dateFormat.format(Date(order.createdAt)) }
@@ -343,6 +376,47 @@ fun OrderItemCard(
                         tint = Color(0xFF94A3B8),
                         modifier = Modifier.size(18.dp)
                     )
+                }
+            }
+
+            // Customer Actions before Cook Acceptance
+            if (currentUserRole == UserRole.CUSTOMER && order.status == OrderStatus.PENDING) {
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = Color(0xFFF1F5F9))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FilledTonalButton(
+                        onClick = onEditClick,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = GreenContainer,
+                            contentColor = GreenPrimary
+                        ),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Update Order", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = onDeleteClick,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color(0xFFDC2626)
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Delete Order", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
                 }
             }
         }

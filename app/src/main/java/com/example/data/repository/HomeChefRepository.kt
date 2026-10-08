@@ -3,6 +3,7 @@ package com.example.data.repository
 import android.content.Context
 import com.example.data.local.*
 import com.example.data.model.*
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
@@ -312,11 +313,20 @@ class HomeChefRepository(private val context: Context) {
     // ─────────────────────────────────────────────────────────────────────────
 
     suspend fun login(email: String, password: String): String? = withContext(Dispatchers.IO) {
+        val trimmedEmail = email.trim().lowercase()
+        val trimmedPass = password.trim()
         return@withContext try {
-            val result = auth.signInWithEmailAndPassword(email.trim(), password).await()
+            val result = try {
+                auth.signInWithEmailAndPassword(trimmedEmail, password).await()
+            } catch (e: Exception) {
+                if (password != trimmedPass) {
+                    auth.signInWithEmailAndPassword(trimmedEmail, trimmedPass).await()
+                } else {
+                    throw e
+                }
+            }
             val firebaseUser = result.user ?: return@withContext "Login failed."
             val uid = firebaseUser.uid
-            val trimmedEmail = email.trim().lowercase()
 
             // 1. Try reading from Firestore
             var user: User? = null
@@ -400,6 +410,7 @@ class HomeChefRepository(private val context: Context) {
             startAllUserListeners(uid)
             null
         } catch (e: Exception) {
+            android.util.Log.e("HomeChef", "Login failed for email '$trimmedEmail': ${e.message}", e)
             parseAuthError(e.message)
         }
     }
@@ -584,14 +595,82 @@ class HomeChefRepository(private val context: Context) {
             msg.contains("email address is badly") -> "Invalid email address format."
             msg.contains("no user record")         -> "No account found with that email."
             msg.contains("password is invalid")    -> "Incorrect password. Please try again."
+            msg.contains("The supplied auth credential is incorrect", ignoreCase = true) ->
+                "Incorrect password. Please check your password and try again."
+            msg.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) ->
+                "Incorrect email or password. Please check and try again."
             msg.contains("email address is already") -> "An account with this email already exists."
             msg.contains("weak-password")          -> "Password must be at least 6 characters."
             msg.contains("network error")          -> "Network error. Check your internet connection."
             msg.contains("account-exists-with-different-credential", ignoreCase = true) ->
                 "An account already exists with this email using a different sign-in method."
             msg.contains("invalid-credential", ignoreCase = true) ->
-                "Invalid credentials. Please verify your Google account and try again."
+                "Incorrect email or password. Please try again."
             else                                   -> "Error: $msg"
+        }
+    }
+
+    suspend fun sendPasswordReset(email: String): String? = withContext(Dispatchers.IO) {
+        return@withContext try {
+            auth.sendPasswordResetEmail(email.trim()).await()
+            null
+        } catch (e: Exception) {
+            parseAuthError(e.message)
+        }
+    }
+
+    suspend fun adminDeleteUser(userId: String): String? = withContext(Dispatchers.IO) {
+        val caller = _currentUser.value
+        if (caller?.role != UserRole.ADMIN) {
+            return@withContext "Permission denied: Only Admin can delete users."
+        }
+        return@withContext try {
+            firestore.collection(COL_USERS).document(userId).delete().await()
+            null
+        } catch (e: Exception) {
+            "Failed to delete user: ${e.message}"
+        }
+    }
+
+    suspend fun adminUpdateUser(
+        userId: String,
+        name: String,
+        email: String,
+        phone: String,
+        role: UserRole,
+        isApprovedCook: Boolean,
+        isSuspended: Boolean
+    ): String? = withContext(Dispatchers.IO) {
+        val caller = _currentUser.value
+        if (caller?.role != UserRole.ADMIN) {
+            return@withContext "Permission denied: Only Admin can update users."
+        }
+
+        val trimmedName = name.trim()
+        val trimmedEmail = email.trim().lowercase()
+        if (trimmedName.isBlank()) {
+            return@withContext "Name cannot be empty."
+        }
+        if (trimmedEmail.isBlank() || !trimmedEmail.contains("@")) {
+            return@withContext "Please enter a valid email address."
+        }
+
+        return@withContext try {
+            val updates = mapOf(
+                "name"           to trimmedName,
+                "email"          to trimmedEmail,
+                "phone"          to phone.trim(),
+                "role"           to role.name,
+                "isApprovedCook" to if (role == UserRole.COOK) isApprovedCook else true,
+                "isSuspended"    to isSuspended
+            )
+            firestore.collection(COL_USERS).document(userId)
+                .set(updates, SetOptions.merge()).await()
+            android.util.Log.d("HomeChef", "Admin updated user $userId: $trimmedName ($trimmedEmail), role: ${role.name}")
+            null
+        } catch (e: Exception) {
+            android.util.Log.e("HomeChef", "adminUpdateUser failed: ${e.message}", e)
+            "Failed to update user: ${e.message}"
         }
     }
 
@@ -831,6 +910,126 @@ class HomeChefRepository(private val context: Context) {
         }
     }
 
+    suspend fun customerUpdateOrder(
+        orderId: String,
+        deliveryAddress: String,
+        customerPhone: String,
+        notesForCook: String,
+        updatedItems: List<CartItem>
+    ): String? = withContext(Dispatchers.IO) {
+        try {
+            val doc = firestore.collection(COL_ORDERS).document(orderId).get().await()
+            if (!doc.exists()) {
+                return@withContext "Order does not exist."
+            }
+            val currentStatus = doc.getString("status") ?: ""
+            if (currentStatus != OrderStatus.PENDING.name) {
+                return@withContext "Cannot update: Order has already been accepted or processed by the cook."
+            }
+            if (updatedItems.isEmpty()) {
+                return@withContext "Order must contain at least one item."
+            }
+
+            val subtotal = updatedItems.sumOf { it.price * it.quantity }
+            val deliveryFee = doc.getDouble("deliveryFee") ?: 2.0
+            val tax = subtotal * 0.05
+            val total = subtotal + deliveryFee + tax
+
+            val itemsData = updatedItems.map { item ->
+                mapOf(
+                    "foodId"         to item.foodId,
+                    "cookId"         to item.cookId,
+                    "cookName"       to item.cookName,
+                    "title"          to item.title,
+                    "description"    to item.description,
+                    "price"          to item.price,
+                    "imageUrl"       to item.imageUrl,
+                    "quantity"       to item.quantity,
+                    "specialRequest" to item.specialRequest
+                )
+            }
+
+            val updates = mapOf(
+                "deliveryAddress" to deliveryAddress.trim(),
+                "customerPhone"   to customerPhone.trim(),
+                "notesForCook"    to notesForCook.trim(),
+                "items"           to itemsData,
+                "subtotal"        to subtotal,
+                "tax"             to tax,
+                "total"           to total
+            )
+
+            firestore.collection(COL_ORDERS).document(orderId).update(updates).await()
+
+            val customerId = doc.getString("customerId") ?: ""
+            if (customerId.isNotBlank()) {
+                val notifId = UUID.randomUUID().toString()
+                firestore.collection(COL_NOTIFICATIONS).document(notifId).set(
+                    mapOf(
+                        "notificationId" to notifId,
+                        "userId"         to customerId,
+                        "title"          to "Order Updated",
+                        "message"        to "Your order #$orderId was updated successfully.",
+                        "timestamp"      to System.currentTimeMillis(),
+                        "isRead"         to false,
+                        "type"           to "ORDER"
+                    )
+                ).await()
+            }
+
+            android.util.Log.d("HomeChef", "Customer updated order $orderId successfully.")
+            null
+        } catch (e: Exception) {
+            android.util.Log.e("HomeChef", "customerUpdateOrder error: ${e.message}", e)
+            e.localizedMessage ?: "Failed to update order."
+        }
+    }
+
+    suspend fun customerDeleteOrder(
+        orderId: String
+    ): String? = withContext(Dispatchers.IO) {
+        try {
+            val doc = firestore.collection(COL_ORDERS).document(orderId).get().await()
+            if (!doc.exists()) {
+                return@withContext "Order does not exist."
+            }
+            val currentStatus = doc.getString("status") ?: ""
+            if (currentStatus != OrderStatus.PENDING.name) {
+                return@withContext "Cannot cancel/delete: Order has already been accepted or processed by the cook."
+            }
+
+            val customerId = doc.getString("customerId") ?: ""
+
+            // Delete order document from Firestore
+            firestore.collection(COL_ORDERS).document(orderId).delete().await()
+
+            // Optimistically remove from local state
+            _orders.value = _orders.value.filter { it.orderId != orderId }
+
+            if (customerId.isNotBlank()) {
+                val notifId = UUID.randomUUID().toString()
+                firestore.collection(COL_NOTIFICATIONS).document(notifId).set(
+                    mapOf(
+                        "notificationId" to notifId,
+                        "userId"         to customerId,
+                        "title"          to "Order Cancelled",
+                        "message"        to "Your order #$orderId was cancelled and deleted.",
+                        "timestamp"      to System.currentTimeMillis(),
+                        "isRead"         to false,
+                        "type"           to "ORDER"
+                    )
+                ).await()
+            }
+
+            android.util.Log.d("HomeChef", "Customer deleted order $orderId successfully.")
+            null
+        } catch (e: Exception) {
+            android.util.Log.e("HomeChef", "customerDeleteOrder error: ${e.message}", e)
+            e.localizedMessage ?: "Failed to delete order."
+        }
+    }
+
+
     // ─────────────────────────────────────────────────────────────────────────
     // FOOD MANAGEMENT — Firestore
     // ─────────────────────────────────────────────────────────────────────────
@@ -913,6 +1112,87 @@ class HomeChefRepository(private val context: Context) {
         scope.launch {
             firestore.collection(COL_USERS).document(userId)
                 .update("isSuspended", !target.isSuspended).await()
+        }
+    }
+
+    suspend fun adminCreateUser(
+        name: String,
+        email: String,
+        phone: String,
+        password: String,
+        role: UserRole,
+        isApprovedCook: Boolean = true
+    ): String? = withContext(Dispatchers.IO) {
+        val caller = _currentUser.value
+        if (caller?.role != UserRole.ADMIN) {
+            return@withContext "Permission denied: Only Admin can create users."
+        }
+
+        val trimmedEmail = email.trim().lowercase()
+        val trimmedPass = password.trim()
+        val trimmedName = name.trim().ifBlank {
+            trimmedEmail.substringBefore("@")
+                .replace(".", " ")
+                .replace("_", " ")
+                .split(" ")
+                .filter { it.isNotBlank() }
+                .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+                .ifBlank { "User" }
+        }
+
+        if (trimmedEmail.isBlank() || !trimmedEmail.contains("@")) {
+            return@withContext "Please enter a valid email address."
+        }
+        if (trimmedPass.length < 6) {
+            return@withContext "Password must be at least 6 characters."
+        }
+
+        // Secondary FirebaseApp allows creating a new Firebase Auth account without logging out the active admin
+        val tempAppName = "AdminUserCreator_${UUID.randomUUID()}"
+        var secondaryApp: FirebaseApp? = null
+        return@withContext try {
+            val options = FirebaseApp.getInstance().options
+            secondaryApp = FirebaseApp.initializeApp(context, options, tempAppName)
+            val secondaryAuth = FirebaseAuth.getInstance(secondaryApp)
+
+            val authResult = secondaryAuth.createUserWithEmailAndPassword(trimmedEmail, trimmedPass).await()
+            val newUid = authResult.user?.uid ?: return@withContext "Failed to obtain new user ID."
+
+            // Set display name in Firebase Auth
+            try {
+                val profileUpdates = com.google.firebase.auth.userProfileChangeRequest {
+                    displayName = trimmedName
+                }
+                authResult.user?.updateProfile(profileUpdates)?.await()
+            } catch (_: Exception) {}
+
+            // Store user document in Firestore users collection
+            val userDoc = mapOf(
+                "userId"         to newUid,
+                "name"           to trimmedName,
+                "email"          to trimmedEmail,
+                "phone"          to phone.trim(),
+                "role"           to role.name,
+                "photoUrl"       to "",
+                "address"        to "",
+                "isApprovedCook" to if (role == UserRole.COOK) isApprovedCook else true,
+                "isSuspended"    to false
+            )
+            firestore.collection(COL_USERS).document(newUid).set(userDoc).await()
+            android.util.Log.d("HomeChef", "Admin created user $trimmedEmail ($newUid) with role ${role.name}")
+            null // Success
+        } catch (e: Exception) {
+            android.util.Log.e("HomeChef", "adminCreateUser failed: ${e.message}", e)
+            parseAuthError(e.message)
+        } finally {
+            try {
+                secondaryApp?.let {
+                    FirebaseAuth.getInstance(it).signOut()
+                    it.delete()
+                }
+            } catch (delEx: Exception) {
+                android.util.Log.w("HomeChef", "Error cleaning up secondary FirebaseApp: ${delEx.message}")
+            }
         }
     }
 

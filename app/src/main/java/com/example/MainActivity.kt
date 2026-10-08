@@ -184,17 +184,29 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
 
                 "orders" -> currentUser?.let { user ->
                     OrdersScreen(
-                        orders      = orders,
-                        currentUser = user,
-                        onOrderClick = { viewModel.selectOrderForTracking(it) }
+                        orders        = orders,
+                        currentUser   = user,
+                        onOrderClick  = { viewModel.selectOrderForTracking(it) },
+                        onUpdateOrder = { orderId, address, phone, notes, items, onResult ->
+                            viewModel.customerUpdateOrder(orderId, address, phone, notes, items, onResult)
+                        },
+                        onDeleteOrder = { orderId, onResult ->
+                            viewModel.customerDeleteOrder(orderId, onResult)
+                        }
                     )
                 }
 
                 "order_tracking" -> {
                     selectedOrder?.let { order ->
                         OrderTrackingScreen(
-                            order       = order,
-                            onBackClick = { viewModel.navigateTo("orders") }
+                            order         = order,
+                            onBackClick   = { viewModel.navigateTo("orders") },
+                            onUpdateOrder = { orderId, address, phone, notes, items, onResult ->
+                                viewModel.customerUpdateOrder(orderId, address, phone, notes, items, onResult)
+                            },
+                            onDeleteOrder = { orderId, onResult ->
+                                viewModel.customerDeleteOrder(orderId, onResult)
+                            }
                         )
                     } ?: viewModel.navigateTo("orders")
                 }
@@ -234,11 +246,23 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
 
                 "admin_dashboard" -> currentUser?.let { user ->
                     AdminDashboardScreen(
-                        currentUser       = user,
-                        users             = allUsers,
-                        orders            = orders,
-                        onApproveCook     = { viewModel.approveCook(it) },
-                        onToggleSuspendUser = { viewModel.toggleSuspendUser(it) }
+                        currentUser         = user,
+                        users               = allUsers,
+                        orders              = orders,
+                        onApproveCook       = { viewModel.approveCook(it) },
+                        onToggleSuspendUser = { viewModel.toggleSuspendUser(it) },
+                        onAddUser           = { name, email, phone, password, role, isApprovedCook, onResult ->
+                            viewModel.adminCreateUser(name, email, phone, password, role, isApprovedCook, onResult)
+                        },
+                        onSendPasswordReset = { email, onResult ->
+                            viewModel.sendPasswordReset(email, onResult)
+                        },
+                        onDeleteUser        = { userId, onResult ->
+                            viewModel.adminDeleteUser(userId, onResult)
+                        },
+                        onUpdateUser        = { userId, name, email, phone, role, isApprovedCook, isSuspended, onResult ->
+                            viewModel.adminUpdateUser(userId, name, email, phone, role, isApprovedCook, isSuspended, onResult)
+                        }
                     )
                 }
 

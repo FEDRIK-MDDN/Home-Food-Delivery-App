@@ -68,6 +68,16 @@ class HomeChefViewModel(application: Application) : AndroidViewModel(application
     private val _authError = MutableStateFlow<String?>(null)
     val authError: StateFlow<String?> = _authError.asStateFlow()
 
+    init {
+        viewModelScope.launch {
+            repository.orders.collect { orderList ->
+                val curId = _selectedOrder.value?.orderId ?: return@collect
+                val updated = orderList.find { it.orderId == curId }
+                _selectedOrder.value = updated
+            }
+        }
+    }
+
     // ─── Auth ─────────────────────────────────────────────────────────────────
 
     fun login(email: String, password: String) {
@@ -212,6 +222,45 @@ class HomeChefViewModel(application: Application) : AndroidViewModel(application
         if (updatedOrder != null) _currentScreen.value = "delivery_map"
     }
 
+    fun customerUpdateOrder(
+        orderId: String,
+        deliveryAddress: String,
+        customerPhone: String,
+        notesForCook: String,
+        updatedItems: List<CartItem>,
+        onResult: (String?) -> Unit
+    ) {
+        viewModelScope.launch {
+            val error = repository.customerUpdateOrder(
+                orderId = orderId,
+                deliveryAddress = deliveryAddress,
+                customerPhone = customerPhone,
+                notesForCook = notesForCook,
+                updatedItems = updatedItems
+            )
+            if (error == null) {
+                val updated = repository.orders.value.find { it.orderId == orderId }
+                if (updated != null) _selectedOrder.value = updated
+            }
+            onResult(error)
+        }
+    }
+
+    fun customerDeleteOrder(
+        orderId: String,
+        onResult: (String?) -> Unit
+    ) {
+        viewModelScope.launch {
+            val error = repository.customerDeleteOrder(orderId)
+            if (error == null) {
+                if (_selectedOrder.value?.orderId == orderId) {
+                    _selectedOrder.value = null
+                }
+            }
+            onResult(error)
+        }
+    }
+
     // ─── Food Management ──────────────────────────────────────────────────────
 
     fun toggleFavorite(foodId: String)                { repository.toggleFavorite(foodId) }
@@ -225,6 +274,51 @@ class HomeChefViewModel(application: Application) : AndroidViewModel(application
 
     fun approveCook(userId: String)     { repository.approveCook(userId) }
     fun toggleSuspendUser(userId: String) { repository.toggleSuspendUser(userId) }
+
+    fun adminCreateUser(
+        name: String,
+        email: String,
+        phone: String,
+        password: String,
+        role: UserRole,
+        isApprovedCook: Boolean = true,
+        onResult: (errorMessage: String?) -> Unit
+    ) {
+        viewModelScope.launch {
+            val error = repository.adminCreateUser(name, email, phone, password, role, isApprovedCook)
+            onResult(error)
+        }
+    }
+
+    fun sendPasswordReset(email: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            val err = repository.sendPasswordReset(email)
+            onResult(err)
+        }
+    }
+
+    fun adminDeleteUser(userId: String, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            val err = repository.adminDeleteUser(userId)
+            onResult(err)
+        }
+    }
+
+    fun adminUpdateUser(
+        userId: String,
+        name: String,
+        email: String,
+        phone: String,
+        role: UserRole,
+        isApprovedCook: Boolean,
+        isSuspended: Boolean,
+        onResult: (errorMessage: String?) -> Unit
+    ) {
+        viewModelScope.launch {
+            val err = repository.adminUpdateUser(userId, name, email, phone, role, isApprovedCook, isSuspended)
+            onResult(err)
+        }
+    }
 
     // ─── AI Recommendation ────────────────────────────────────────────────────
 
