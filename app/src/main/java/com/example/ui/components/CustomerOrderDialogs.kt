@@ -451,3 +451,108 @@ fun CustomerDeleteOrderDialog(
         containerColor = Color.White
     )
 }
+
+@Composable
+fun CancelDeliveryDialog(
+    order: Order,
+    onDismiss: () -> Unit,
+    onConfirmCancel: (orderId: String, onResult: (String?) -> Unit) -> Unit
+) {
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = { if (!isLoading) onDismiss() },
+        icon = {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFFFEE2E2)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PriorityHigh,
+                    contentDescription = null,
+                    tint = Color(0xFFDC2626),
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+        },
+        title = {
+            Text(
+                text = "Cancel Delivery?",
+                fontWeight = FontWeight.Bold,
+                fontSize = 19.sp,
+                color = Color(0xFF0F172A)
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Are you sure you want to cancel this delivery?\nThis action cannot be undone.",
+                    fontSize = 14.sp,
+                    color = Color(0xFF64748B),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                if (errorMessage != null) {
+                    Text(
+                        text = errorMessage!!,
+                        fontSize = 12.sp,
+                        color = Color(0xFFDC2626),
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        },
+        dismissButton = {
+            FilledTonalButton(
+                onClick = onDismiss,
+                enabled = !isLoading,
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = Color(0xFFF1F5F9),
+                    contentColor = Color(0xFF334155)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Keep Delivery", fontWeight = FontWeight.SemiBold)
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    isLoading = true
+                    errorMessage = null
+                    onConfirmCancel(order.orderId) { err ->
+                        isLoading = false
+                        if (err != null) {
+                            errorMessage = err
+                        } else {
+                            onDismiss()
+                        }
+                    }
+                },
+                enabled = !isLoading,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        color = Color.White,
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Cancel Delivery", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        },
+        shape = RoundedCornerShape(22.dp),
+        containerColor = Color.White
+    )
+}

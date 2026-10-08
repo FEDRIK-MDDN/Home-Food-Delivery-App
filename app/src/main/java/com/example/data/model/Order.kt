@@ -20,5 +20,6 @@ data class Order(
     val notesForCook: String = "",
     val rejectReason: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
-    val estimatedMinutes: Int = 25
+    val estimatedMinutes: Int = 25,
+    val cancelledDriverIds: List<String> = emptyList()
 )

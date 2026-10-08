@@ -27,6 +27,7 @@ import com.example.data.model.Order
 import com.example.data.model.OrderStatus
 import com.example.data.model.User
 import com.example.data.model.UserRole
+import com.example.ui.components.CancelDeliveryDialog
 import com.example.ui.components.CustomerDeleteOrderDialog
 import com.example.ui.components.CustomerEditOrderDialog
 import com.example.ui.theme.GreenContainer
@@ -42,20 +43,22 @@ fun OrdersScreen(
     currentUser: User,
     onOrderClick: (Order) -> Unit,
     onUpdateOrder: (orderId: String, deliveryAddress: String, phone: String, notes: String, items: List<CartItem>, onResult: (String?) -> Unit) -> Unit = { _, _, _, _, _, _ -> },
-    onDeleteOrder: (orderId: String, onResult: (String?) -> Unit) -> Unit = { _, _ -> }
+    onDeleteOrder: (orderId: String, onResult: (String?) -> Unit) -> Unit = { _, _ -> },
+    onCancelDelivery: (orderId: String, onResult: (String?) -> Unit) -> Unit = { _, _ -> }
 ) {
     // ── Role-based tab definitions ─────────────────────────────────────────────
     // Each role sees different filter tabs that match their workflow.
     val tabs = when (currentUser.role) {
         UserRole.CUSTOMER  -> listOf("All", "Active", "Completed", "Cancelled")
         UserRole.COOK      -> listOf("All", "New", "In Kitchen", "Done")
-        UserRole.DELIVERY  -> listOf("All", "My Trips", "Delivered")
+        UserRole.DELIVERY  -> listOf("All", "Active", "Completed", "Cancelled")
         UserRole.ADMIN     -> listOf("All", "Active", "Completed", "Cancelled")
     }
 
     var selectedTab by remember { mutableStateOf(tabs.first()) }
     var orderToEdit by remember { mutableStateOf<Order?>(null) }
     var orderToDelete by remember { mutableStateOf<Order?>(null) }
+    var orderToCancelDelivery by remember { mutableStateOf<Order?>(null) }
 
     // ── Role-based pre-filter: only show orders relevant to this user ───────────
     val roleFilteredOrders = remember(orders, currentUser) {
@@ -64,10 +67,9 @@ fun OrdersScreen(
             UserRole.CUSTOMER -> orders.filter { it.customerId == currentUser.userId }
             // Cook: only orders sent to their kitchen
             UserRole.COOK     -> orders.filter { it.cookId == currentUser.userId }
-            // Delivery: only orders they've claimed or that are ready for pickup
+            // Delivery: orders claimed by this driver OR orders this driver cancelled
             UserRole.DELIVERY -> orders.filter {
-                it.deliveryId == currentUser.userId ||
-                (it.status == OrderStatus.READY && it.deliveryId.isNullOrEmpty())
+                it.deliveryId == currentUser.userId || it.cancelledDriverIds.contains(currentUser.userId)
             }
             // Admin: sees everything
             UserRole.ADMIN    -> orders
@@ -75,7 +77,7 @@ fun OrdersScreen(
     }
 
     // ── Tab sub-filter: further filter by selected tab ─────────────────────────
-    val filteredOrders = remember(roleFilteredOrders, selectedTab, currentUser.role) {
+    val filteredOrders = remember(roleFilteredOrders, selectedTab, currentUser.role, currentUser.userId) {
         when (currentUser.role) {
             UserRole.CUSTOMER, UserRole.ADMIN -> when (selectedTab) {
                 "Active"    -> roleFilteredOrders.filter {
@@ -96,13 +98,19 @@ fun OrdersScreen(
                 else         -> roleFilteredOrders
             }
             UserRole.DELIVERY -> when (selectedTab) {
-                "My Trips"  -> roleFilteredOrders.filter {
+                "Active"    -> roleFilteredOrders.filter {
                     it.deliveryId == currentUser.userId &&
                     it.status != OrderStatus.DELIVERED &&
-                    it.status != OrderStatus.COMPLETED
+                    it.status != OrderStatus.COMPLETED &&
+                    it.status != OrderStatus.CANCELLED
                 }
-                "Delivered" -> roleFilteredOrders.filter {
-                    it.status == OrderStatus.DELIVERED || it.status == OrderStatus.COMPLETED
+                "Completed" -> roleFilteredOrders.filter {
+                    it.deliveryId == currentUser.userId &&
+                    (it.status == OrderStatus.DELIVERED || it.status == OrderStatus.COMPLETED)
+                }
+                "Cancelled" -> roleFilteredOrders.filter {
+                    (it.cancelledDriverIds.contains(currentUser.userId) && it.deliveryId != currentUser.userId) ||
+                    (it.deliveryId == currentUser.userId && it.status == OrderStatus.CANCELLED)
                 }
                 else        -> roleFilteredOrders
             }
@@ -123,7 +131,7 @@ fun OrdersScreen(
                 title = {
                     Column {
                         Text(
-                            text = "$screenTitle (${roleFilteredOrders.size})",
+                            text = "$screenTitle (${filteredOrders.size})",
                             fontWeight = FontWeight.Bold,
                             fontSize = 20.sp,
                             color = Color(0xFF0F172A)
@@ -224,9 +232,11 @@ fun OrdersScreen(
                         OrderItemCard(
                             order = order,
                             currentUserRole = currentUser.role,
+                            currentUserId = currentUser.userId,
                             onClick = { onOrderClick(order) },
                             onEditClick = { orderToEdit = order },
-                            onDeleteClick = { orderToDelete = order }
+                            onDeleteClick = { orderToDelete = order },
+                            onCancelDeliveryClick = { orderToCancelDelivery = order }
                         )
                     }
                     item {
@@ -256,20 +266,38 @@ fun OrdersScreen(
             }
         )
     }
+
+    orderToCancelDelivery?.let { ord ->
+        CancelDeliveryDialog(
+            order = ord,
+            onDismiss = { orderToCancelDelivery = null },
+            onConfirmCancel = { orderId, onResult ->
+                onCancelDelivery(orderId, onResult)
+            }
+        )
+    }
 }
 
 @Composable
 fun OrderItemCard(
     order: Order,
     currentUserRole: UserRole = UserRole.CUSTOMER,
+    currentUserId: String = "",
     onClick: () -> Unit,
     onEditClick: () -> Unit = {},
-    onDeleteClick: () -> Unit = {}
+    onDeleteClick: () -> Unit = {},
+    onCancelDeliveryClick: () -> Unit = {}
 ) {
     val dateFormat = remember { SimpleDateFormat("MMM dd, yyyy • hh:mm a", Locale.getDefault()) }
     val formattedDate = remember(order.createdAt) { dateFormat.format(Date(order.createdAt)) }
 
-    val (statusColor, statusBg) = when (order.status) {
+    val isDeliveryCancelledByMe = currentUserRole == UserRole.DELIVERY &&
+        order.cancelledDriverIds.contains(currentUserId) &&
+        order.deliveryId != currentUserId
+
+    val (statusColor, statusBg) = if (isDeliveryCancelledByMe) {
+        Color(0xFFDC2626) to Color(0xFFFEE2E2)
+    } else when (order.status) {
         OrderStatus.PENDING                                              -> Color(0xFFD97706) to Color(0xFFFEF3C7)
         OrderStatus.ACCEPTED, OrderStatus.PREPARING                     -> Color(0xFF2563EB) to Color(0xFFDBEAFE)
         OrderStatus.READY, OrderStatus.PICKED_UP,
@@ -277,6 +305,8 @@ fun OrderItemCard(
         OrderStatus.DELIVERED, OrderStatus.COMPLETED                    -> Color(0xFF16A34A) to Color(0xFFDCFCE7)
         OrderStatus.CANCELLED                                           -> Color(0xFFDC2626) to Color(0xFFFEE2E2)
     }
+
+    val displayStatusLabel = if (isDeliveryCancelledByMe) "Delivery Cancelled" else order.status.label
 
     // Role-specific subtitle: who the "other party" is depends on perspective
     val subtitle = when (currentUserRole) {
@@ -325,7 +355,7 @@ fun OrderItemCard(
                     color = statusBg
                 ) {
                     Text(
-                        text = order.status.label,
+                        text = displayStatusLabel,
                         color = statusColor,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp,
@@ -416,6 +446,32 @@ fun OrderItemCard(
                         Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Delete Order", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            // Delivery Partner Actions before starting route (only if claimed by this driver)
+            if (currentUserRole == UserRole.DELIVERY && order.deliveryId == currentUserId && (order.status == OrderStatus.PICKED_UP || order.status == OrderStatus.READY)) {
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = Color(0xFFF1F5F9))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    OutlinedButton(
+                        onClick = onCancelDeliveryClick,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color(0xFFDC2626)
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Cancel Delivery (Before Pickup)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
             }

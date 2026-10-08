@@ -6,6 +6,7 @@ import com.example.data.model.*
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
@@ -21,8 +22,9 @@ import java.util.UUID
 // Firestore collection names
 private const val COL_USERS         = "users"
 private const val COL_FOODS         = "foods"
-private const val COL_ORDERS        = "orders"
-private const val COL_NOTIFICATIONS = "notifications"
+private const val COL_ORDERS          = "orders"
+private const val COL_NOTIFICATIONS   = "notifications"
+private const val COL_DELIVERY_ISSUES = "delivery_issues"
 
 private val DUMMY_FOOD_IDS = setOf("f_sarah_01", "f_001", "f_002", "f_003", "f_004", "f_005")
 private val DUMMY_COOK_IDS = setOf("cook_001", "cook_002")
@@ -43,6 +45,7 @@ class HomeChefRepository(private val context: Context) {
     private var usersListener: ListenerRegistration? = null
     private var cartListener: ListenerRegistration? = null
     private var favoritesListener: ListenerRegistration? = null
+    private var issuesListener: ListenerRegistration? = null
 
     // ─── State Flows ──────────────────────────────────────────────────────────
     private val _currentUser = MutableStateFlow<User?>(null)
@@ -59,6 +62,9 @@ class HomeChefRepository(private val context: Context) {
 
     private val _notifications = MutableStateFlow<List<NotificationItem>>(emptyList())
     val notifications: StateFlow<List<NotificationItem>> = _notifications.asStateFlow()
+
+    private val _deliveryIssues = MutableStateFlow<List<DeliveryIssue>>(emptyList())
+    val deliveryIssues: StateFlow<List<DeliveryIssue>> = _deliveryIssues.asStateFlow()
 
     // ─── Cart & Favorites (Firestore-backed, cloud-synced) ────────────────────
     private val _favoriteFoodIds = MutableStateFlow<List<String>>(emptyList())
@@ -261,12 +267,29 @@ class HomeChefRepository(private val context: Context) {
             }
     }
 
+    private fun startDeliveryIssuesListener(userId: String) {
+        issuesListener?.remove()
+        issuesListener = firestore.collection(COL_DELIVERY_ISSUES)
+            .whereEqualTo("driverId", userId)
+            .addSnapshotListener { snap, error ->
+                if (error != null) {
+                    android.util.Log.w("HomeChef", "Delivery issues listener error: ${error.message}")
+                    return@addSnapshotListener
+                }
+                if (snap != null) {
+                    _deliveryIssues.value = snap.documents.mapNotNull { it.toDeliveryIssue() }
+                        .sortedByDescending { it.createdAt }
+                }
+            }
+    }
+
     private fun startAllUserListeners(uid: String) {
         startGlobalListeners()
         fetchFoodsOnce()
         startUserNotifListener(uid)
         startUserCartListener(uid)
         startUserFavoritesListener(uid)
+        startDeliveryIssuesListener(uid)
         cleanDummyFoodsFromFirestore()
     }
 
@@ -274,9 +297,11 @@ class HomeChefRepository(private val context: Context) {
         notifsListener?.remove()
         cartListener?.remove()
         favoritesListener?.remove()
+        issuesListener?.remove()
         _cartItems.value = emptyList()
         _favoriteFoodIds.value = emptyList()
         _notifications.value = emptyList()
+        _deliveryIssues.value = emptyList()
     }
 
     // Seeds admin account into Firebase Auth + Firestore on first launch
@@ -904,11 +929,139 @@ class HomeChefRepository(private val context: Context) {
                 mapOf(
                     "deliveryId"          to deliveryId,
                     "deliveryPartnerName" to deliveryPartnerName,
-                    "status"              to OrderStatus.PICKED_UP.name
+                    "status"              to OrderStatus.PICKED_UP.name,
+                    "cancelledDriverIds"  to FieldValue.arrayRemove(deliveryId)
                 )
             ).await()
         }
     }
+
+    suspend fun cancelDeliveryAssignment(orderId: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val doc = firestore.collection(COL_ORDERS).document(orderId).get().await()
+            if (!doc.exists()) {
+                return@withContext "Order does not exist."
+            }
+            val currentStatus = doc.getString("status") ?: ""
+            // Ensure delivery cannot be cancelled once route has started or completed
+            if (currentStatus == OrderStatus.OUT_FOR_DELIVERY.name ||
+                currentStatus == OrderStatus.DELIVERED.name ||
+                currentStatus == OrderStatus.COMPLETED.name ||
+                currentStatus == OrderStatus.CANCELLED.name) {
+                return@withContext "Cannot cancel delivery: Route has already started or order is completed."
+            }
+
+            val cancellingDriverId = doc.getString("deliveryId") ?: auth.currentUser?.uid ?: ""
+
+            val updates = mutableMapOf<String, Any>(
+                "deliveryId"          to FieldValue.delete(),
+                "deliveryPartnerName" to FieldValue.delete(),
+                "status"              to OrderStatus.READY.name
+            )
+            if (cancellingDriverId.isNotEmpty()) {
+                updates["cancelledDriverIds"] = FieldValue.arrayUnion(cancellingDriverId)
+            }
+            firestore.collection(COL_ORDERS).document(orderId).update(updates).await()
+
+            _orders.value = _orders.value.map { ord ->
+                if (ord.orderId == orderId) {
+                    val updatedCancelledDrivers = if (cancellingDriverId.isNotEmpty() && !ord.cancelledDriverIds.contains(cancellingDriverId)) {
+                        ord.cancelledDriverIds + cancellingDriverId
+                    } else {
+                        ord.cancelledDriverIds
+                    }
+                    ord.copy(
+                        deliveryId = null,
+                        deliveryPartnerName = null,
+                        status = OrderStatus.READY,
+                        cancelledDriverIds = updatedCancelledDrivers
+                    )
+                } else ord
+            }
+
+            android.util.Log.d("HomeChef", "Delivery cancelled for order $orderId, returned to available pickup requests.")
+            null
+        } catch (e: Exception) {
+            android.util.Log.e("HomeChef", "cancelDeliveryAssignment error: ${e.message}", e)
+            e.localizedMessage ?: "Failed to cancel delivery."
+        }
+    }
+
+    suspend fun createDeliveryIssue(
+        orderId: String?,
+        category: String,
+        description: String,
+        priority: String = "MEDIUM"
+    ): String? = withContext(Dispatchers.IO) {
+        val user = _currentUser.value ?: return@withContext "You must be logged in."
+        try {
+            val issueId = "ISSUE-${System.currentTimeMillis().toString().takeLast(6)}"
+            val issue = DeliveryIssue(
+                issueId     = issueId,
+                driverId    = user.userId,
+                driverName  = user.name,
+                orderId     = orderId?.takeIf { it.isNotBlank() },
+                category    = category,
+                description = description.trim(),
+                priority    = priority,
+                status      = "OPEN",
+                createdAt   = System.currentTimeMillis(),
+                updatedAt   = System.currentTimeMillis()
+            )
+            firestore.collection(COL_DELIVERY_ISSUES).document(issueId).set(issue.toMap()).await()
+            _deliveryIssues.value = (listOf(issue) + _deliveryIssues.value.filterNot { it.issueId == issueId })
+            android.util.Log.d("HomeChef", "Delivery issue created: $issueId")
+            null
+        } catch (e: Exception) {
+            android.util.Log.e("HomeChef", "createDeliveryIssue error: ${e.message}", e)
+            e.localizedMessage ?: "Failed to report issue."
+        }
+    }
+
+    suspend fun updateDeliveryIssue(
+        issueId: String,
+        category: String,
+        description: String,
+        priority: String
+    ): String? = withContext(Dispatchers.IO) {
+        try {
+            val updates = mapOf(
+                "category"    to category,
+                "description" to description.trim(),
+                "priority"    to priority,
+                "updatedAt"   to System.currentTimeMillis()
+            )
+            firestore.collection(COL_DELIVERY_ISSUES).document(issueId).update(updates).await()
+            _deliveryIssues.value = _deliveryIssues.value.map {
+                if (it.issueId == issueId) {
+                    it.copy(
+                        category = category,
+                        description = description.trim(),
+                        priority = priority,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                } else it
+            }
+            android.util.Log.d("HomeChef", "Delivery issue updated: $issueId")
+            null
+        } catch (e: Exception) {
+            android.util.Log.e("HomeChef", "updateDeliveryIssue error: ${e.message}", e)
+            e.localizedMessage ?: "Failed to update issue."
+        }
+    }
+
+    suspend fun deleteDeliveryIssue(issueId: String): String? = withContext(Dispatchers.IO) {
+        try {
+            firestore.collection(COL_DELIVERY_ISSUES).document(issueId).delete().await()
+            _deliveryIssues.value = _deliveryIssues.value.filterNot { it.issueId == issueId }
+            android.util.Log.d("HomeChef", "Delivery issue deleted: $issueId")
+            null
+        } catch (e: Exception) {
+            android.util.Log.e("HomeChef", "deleteDeliveryIssue error: ${e.message}", e)
+            e.localizedMessage ?: "Failed to withdraw issue report."
+        }
+    }
+
 
     suspend fun customerUpdateOrder(
         orderId: String,
@@ -1275,6 +1428,9 @@ private fun com.google.firebase.firestore.DocumentSnapshot.toOrder(): Order? = t
             specialRequest = m["specialRequest"] as? String ?: ""
         )
     }
+    @Suppress("UNCHECKED_CAST")
+    val cancelledDriverIds = (get("cancelledDriverIds") as? List<String>) ?: emptyList()
+
     Order(
         orderId             = getString("orderId") ?: id,
         customerId          = getString("customerId") ?: "",
@@ -1294,7 +1450,8 @@ private fun com.google.firebase.firestore.DocumentSnapshot.toOrder(): Order? = t
         deliveryId          = getString("deliveryId"),
         deliveryPartnerName = getString("deliveryPartnerName"),
         rejectReason        = getString("rejectReason"),
-        createdAt           = getLong("createdAt") ?: 0L
+        createdAt           = getLong("createdAt") ?: 0L,
+        cancelledDriverIds  = cancelledDriverIds
     )
 } catch (e: Exception) { null }
 
@@ -1309,6 +1466,34 @@ private fun com.google.firebase.firestore.DocumentSnapshot.toNotification(): Not
         type           = getString("type") ?: "GENERAL"
     )
 } catch (e: Exception) { null }
+
+private fun com.google.firebase.firestore.DocumentSnapshot.toDeliveryIssue(): DeliveryIssue? = try {
+    DeliveryIssue(
+        issueId     = getString("issueId") ?: id,
+        driverId    = getString("driverId") ?: "",
+        driverName  = getString("driverName") ?: "",
+        orderId     = getString("orderId"),
+        category    = getString("category") ?: DeliveryIssueCategories.OTHER,
+        description = getString("description") ?: "",
+        priority    = getString("priority") ?: "MEDIUM",
+        status      = getString("status") ?: "OPEN",
+        createdAt   = getLong("createdAt") ?: System.currentTimeMillis(),
+        updatedAt   = getLong("updatedAt") ?: System.currentTimeMillis()
+    )
+} catch (e: Exception) { null }
+
+private fun DeliveryIssue.toMap(): Map<String, Any?> = mapOf(
+    "issueId"     to issueId,
+    "driverId"    to driverId,
+    "driverName"  to driverName,
+    "orderId"     to orderId,
+    "category"    to category,
+    "description" to description,
+    "priority"    to priority,
+    "status"      to status,
+    "createdAt"   to createdAt,
+    "updatedAt"   to updatedAt
+)
 
 // ─── Domain model → Firestore Map ─────────────────────────────────────────────
 
@@ -1366,7 +1551,8 @@ private fun Order.toMap() = mapOf(
     "deliveryId"          to deliveryId,
     "deliveryPartnerName" to deliveryPartnerName,
     "rejectReason"        to rejectReason,
-    "createdAt"           to createdAt
+    "createdAt"           to createdAt,
+    "cancelledDriverIds"  to cancelledDriverIds
 )
 
 // ─── Default food catalog (seeded to Firestore if empty) ──────────────────────

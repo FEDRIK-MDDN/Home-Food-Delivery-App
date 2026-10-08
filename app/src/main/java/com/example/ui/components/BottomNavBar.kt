@@ -52,6 +52,7 @@ fun HomeChefBottomNavBar(
         UserRole.DELIVERY -> listOf(
             NavTabItem("delivery_dashboard", "Trips", Icons.Filled.TwoWheeler, Icons.Outlined.TwoWheeler),
             NavTabItem("orders", "Orders", Icons.AutoMirrored.Filled.ReceiptLong, Icons.AutoMirrored.Outlined.ReceiptLong),
+            NavTabItem("delivery_issues", "Issues", Icons.Filled.ReportProblem, Icons.Outlined.ReportProblem),
             NavTabItem("profile", "Profile", Icons.Filled.Person, Icons.Outlined.Person)
         )
         UserRole.ADMIN -> listOf(

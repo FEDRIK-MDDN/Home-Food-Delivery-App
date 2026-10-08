@@ -48,9 +48,12 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
     val orders      by viewModel.orders.collectAsState()
     val totalCartCount = cartItems.sumOf { it.quantity }
 
-    val selectedOrder by viewModel.selectedOrder.collectAsState()
-    val allUsers      by viewModel.users.collectAsState()
-    val authError     by viewModel.authError.collectAsState()
+    val selectedOrder  by viewModel.selectedOrder.collectAsState()
+    val allUsers       by viewModel.users.collectAsState()
+    val authError      by viewModel.authError.collectAsState()
+    val deliveryIssues by viewModel.deliveryIssues.collectAsState()
+
+    var preselectedIssueOrderId by remember { mutableStateOf<String?>(null) }
 
     val favoriteFoods = remember(foods, favoriteFoodIds) {
         foods.filter { favoriteFoodIds.contains(it.foodId) && it.isAvailable }
@@ -77,7 +80,8 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
 
     val screensWithNav = setOf(
         "customer_home", "favorites", "cart", "orders", "profile",
-        "chef_ai", "cook_dashboard", "delivery_dashboard", "admin_dashboard"
+        "chef_ai", "cook_dashboard", "delivery_dashboard", "admin_dashboard",
+        "delivery_issues"
     )
 
     Scaffold(
@@ -184,14 +188,17 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
 
                 "orders" -> currentUser?.let { user ->
                     OrdersScreen(
-                        orders        = orders,
-                        currentUser   = user,
-                        onOrderClick  = { viewModel.selectOrderForTracking(it) },
-                        onUpdateOrder = { orderId, address, phone, notes, items, onResult ->
+                        orders           = orders,
+                        currentUser      = user,
+                        onOrderClick     = { viewModel.selectOrderForTracking(it) },
+                        onUpdateOrder    = { orderId, address, phone, notes, items, onResult ->
                             viewModel.customerUpdateOrder(orderId, address, phone, notes, items, onResult)
                         },
-                        onDeleteOrder = { orderId, onResult ->
+                        onDeleteOrder    = { orderId, onResult ->
                             viewModel.customerDeleteOrder(orderId, onResult)
+                        },
+                        onCancelDelivery = { orderId, onResult ->
+                            viewModel.cancelDelivery(orderId, onResult)
                         }
                     )
                 }
@@ -226,22 +233,58 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
 
                 "delivery_dashboard" -> currentUser?.let { user ->
                     DeliveryDashboardScreen(
-                        currentUser        = user,
-                        orders             = orders,
-                        onClaimDelivery    = { viewModel.claimDelivery(it) },
-                        onUpdateOrderStatus = { orderId, status -> viewModel.updateOrderStatus(orderId, status) },
-                        onOpenMap          = { viewModel.openDeliveryMap(it) }
+                        currentUser          = user,
+                        orders               = orders,
+                        onClaimDelivery      = { viewModel.claimDelivery(it) },
+                        onUpdateOrderStatus  = { orderId, status -> viewModel.updateOrderStatus(orderId, status) },
+                        onOpenMap            = { viewModel.openDeliveryMap(it) },
+                        onCancelDelivery     = { orderId, onResult ->
+                            viewModel.cancelDelivery(orderId, onResult)
+                        },
+                        onNavigateToIssues   = { orderId ->
+                            preselectedIssueOrderId = orderId
+                            viewModel.navigateTo("delivery_issues")
+                        }
                     )
                 }
 
                 "delivery_map" -> {
                     selectedOrder?.let { order ->
                         DeliveryMapScreen(
-                            order           = order,
-                            onBackClick     = { viewModel.navigateTo("delivery_dashboard") },
-                            onUpdateOrderStatus = { orderId, status -> viewModel.updateOrderStatus(orderId, status) }
+                            order               = order,
+                            onBackClick         = { viewModel.navigateTo("delivery_dashboard") },
+                            onUpdateOrderStatus = { orderId, status -> viewModel.updateOrderStatus(orderId, status) },
+                            onCancelDelivery    = { orderId, onResult ->
+                                viewModel.cancelDelivery(orderId, onResult)
+                            },
+                            onReportIssue       = {
+                                preselectedIssueOrderId = order.orderId
+                                viewModel.navigateTo("delivery_issues")
+                            }
                         )
                     } ?: viewModel.navigateTo("delivery_dashboard")
+                }
+
+                "delivery_issues" -> currentUser?.let { user ->
+                    DeliveryIssuesScreen(
+                        currentUser        = user,
+                        issues             = deliveryIssues,
+                        claimedOrders      = orders.filter { it.deliveryId == user.userId },
+                        preselectedOrderId = preselectedIssueOrderId,
+                        onCreateIssue      = { orderId, cat, desc, prio, onRes ->
+                            viewModel.createDeliveryIssue(orderId, cat, desc, prio, onRes)
+                        },
+                        onUpdateIssue      = { issueId, cat, desc, prio, onRes ->
+                            viewModel.updateDeliveryIssue(issueId, cat, desc, prio, onRes)
+                        },
+                        onDeleteIssue      = { issueId, onRes ->
+                            viewModel.deleteDeliveryIssue(issueId, onRes)
+                        },
+                        onBackClick        = {
+                            preselectedIssueOrderId = null
+                            viewModel.navigateTo("delivery_dashboard")
+                        }
+                    )
                 }
 
                 "admin_dashboard" -> currentUser?.let { user ->

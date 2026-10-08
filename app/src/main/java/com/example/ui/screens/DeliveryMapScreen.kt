@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Order
 import com.example.data.model.OrderStatus
+import com.example.ui.components.CancelDeliveryDialog
 import com.example.ui.theme.GreenContainer
 import com.example.ui.theme.GreenPrimary
 
@@ -41,10 +42,13 @@ import com.example.ui.theme.GreenPrimary
 fun DeliveryMapScreen(
     order: Order,
     onBackClick: () -> Unit,
-    onUpdateOrderStatus: (orderId: String, newStatus: OrderStatus) -> Unit
+    onUpdateOrderStatus: (orderId: String, newStatus: OrderStatus) -> Unit,
+    onCancelDelivery: (orderId: String, onResult: (String?) -> Unit) -> Unit = { _, _ -> },
+    onReportIssue: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var isSimulatingDrive by remember { mutableStateOf(false) }
+    var showCancelDialog by remember { mutableStateOf(false) }
 
     // Animated progress along route (0.0 to 1.0)
     val driveProgress by animateFloatAsState(
@@ -88,6 +92,13 @@ fun DeliveryMapScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onReportIssue) {
+                        Icon(
+                            imageVector = Icons.Default.ReportProblem,
+                            contentDescription = "Report Delivery Issue",
+                            tint = Color(0xFFDC2626)
+                        )
+                    }
                     IconButton(
                         onClick = {
                             val address = if (isPickupPhase) order.cookName else order.deliveryAddress
@@ -302,22 +313,41 @@ fun DeliveryMapScreen(
                                 Text("I've Picked Up Food from Kitchen", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                             }
                         }
-                        order.status == OrderStatus.PICKED_UP -> {
-                            Button(
-                                onClick = {
-                                    onUpdateOrderStatus(order.orderId, OrderStatus.OUT_FOR_DELIVERY)
-                                    isSimulatingDrive = true
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp)
-                                    .testTag("start_route_button"),
-                                shape = RoundedCornerShape(14.dp)
+                        order.status == OrderStatus.PICKED_UP || order.status == OrderStatus.READY -> {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Icon(Icons.Default.TwoWheeler, contentDescription = null)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Start Route to Customer", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                OutlinedButton(
+                                    onClick = { showCancelDialog = true },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(52.dp)
+                                ) {
+                                    Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Cancel", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        onUpdateOrderStatus(order.orderId, OrderStatus.OUT_FOR_DELIVERY)
+                                        isSimulatingDrive = true
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                                    modifier = Modifier
+                                        .weight(1.8f)
+                                        .height(52.dp)
+                                        .testTag("start_route_button"),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Icon(Icons.Default.TwoWheeler, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Start Route", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                }
                             }
                         }
                         order.status == OrderStatus.OUT_FOR_DELIVERY -> {
@@ -357,6 +387,21 @@ fun DeliveryMapScreen(
                 }
             }
         }
+    }
+
+    if (showCancelDialog) {
+        CancelDeliveryDialog(
+            order = order,
+            onDismiss = { showCancelDialog = false },
+            onConfirmCancel = { orderId, onResult ->
+                onCancelDelivery(orderId) { err ->
+                    onResult(err)
+                    if (err == null) {
+                        onBackClick()
+                    }
+                }
+            }
+        )
     }
 }
 

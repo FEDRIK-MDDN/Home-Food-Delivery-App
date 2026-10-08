@@ -34,6 +34,9 @@ class HomeChefViewModel(application: Application) : AndroidViewModel(application
     // Notifications
     val notifications = repository.notifications
 
+    // Delivery Issues
+    val deliveryIssues = repository.deliveryIssues
+
     // Navigation
     private val _currentScreen = MutableStateFlow("splash")
     val currentScreen: StateFlow<String> = _currentScreen.asStateFlow()
@@ -220,6 +223,54 @@ class HomeChefViewModel(application: Application) : AndroidViewModel(application
         val updatedOrder = repository.orders.value.find { it.orderId == orderId }
         _selectedOrder.value = updatedOrder
         if (updatedOrder != null) _currentScreen.value = "delivery_map"
+    }
+
+    fun cancelDelivery(orderId: String, onResult: (String?) -> Unit = {}) {
+        viewModelScope.launch {
+            val error = repository.cancelDeliveryAssignment(orderId)
+            if (error == null) {
+                if (_selectedOrder.value?.orderId == orderId) {
+                    _selectedOrder.value = repository.orders.value.find { it.orderId == orderId }
+                }
+            }
+            onResult(error)
+        }
+    }
+
+    fun createDeliveryIssue(
+        orderId: String?,
+        category: String,
+        description: String,
+        priority: String = "MEDIUM",
+        onResult: (String?) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val error = repository.createDeliveryIssue(orderId, category, description, priority)
+            onResult(error)
+        }
+    }
+
+    fun updateDeliveryIssue(
+        issueId: String,
+        category: String,
+        description: String,
+        priority: String = "MEDIUM",
+        onResult: (String?) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val error = repository.updateDeliveryIssue(issueId, category, description, priority)
+            onResult(error)
+        }
+    }
+
+    fun deleteDeliveryIssue(
+        issueId: String,
+        onResult: (String?) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val error = repository.deleteDeliveryIssue(issueId)
+            onResult(error)
+        }
     }
 
     fun customerUpdateOrder(

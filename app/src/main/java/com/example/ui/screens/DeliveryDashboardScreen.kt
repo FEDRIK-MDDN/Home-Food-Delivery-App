@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.Order
 import com.example.data.model.OrderStatus
 import com.example.data.model.User
+import com.example.ui.components.CancelDeliveryDialog
 import com.example.ui.theme.GreenContainer
 import com.example.ui.theme.GreenPrimary
 
@@ -31,12 +32,18 @@ fun DeliveryDashboardScreen(
     orders: List<Order>,
     onClaimDelivery: (orderId: String) -> Unit,
     onUpdateOrderStatus: (orderId: String, newStatus: OrderStatus) -> Unit,
-    onOpenMap: (Order) -> Unit
+    onOpenMap: (Order) -> Unit,
+    onCancelDelivery: (orderId: String, onResult: (String?) -> Unit) -> Unit = { _, _ -> },
+    onNavigateToIssues: (preselectedOrderId: String?) -> Unit = {}
 ) {
+    var orderToCancel by remember { mutableStateOf<Order?>(null) }
     // Available orders ready for pickup — Bug 8 fix: only READY orders are shown.
     // PREPARING orders must NOT be listed; the cook hasn't finished yet.
     val availablePickups = remember(orders) {
-        orders.filter { it.status == OrderStatus.READY && it.deliveryId.isNullOrEmpty() }
+        orders.filter {
+            it.status == OrderStatus.READY &&
+            it.deliveryId.isNullOrEmpty()
+        }
     }
 
     // Active deliveries claimed by this partner
@@ -154,7 +161,9 @@ fun DeliveryDashboardScreen(
                             isClaimed = true,
                             onClaim = { },
                             onOpenMap = { onOpenMap(order) },
-                            onUpdateStatus = { newStatus -> onUpdateOrderStatus(order.orderId, newStatus) }
+                            onUpdateStatus = { newStatus -> onUpdateOrderStatus(order.orderId, newStatus) },
+                            onCancelDelivery = { orderToCancel = order },
+                            onReportIssue = { onNavigateToIssues(order.orderId) }
                         )
                     }
                 }
@@ -202,6 +211,16 @@ fun DeliveryDashboardScreen(
             }
         }
     }
+
+    orderToCancel?.let { ord ->
+        CancelDeliveryDialog(
+            order = ord,
+            onDismiss = { orderToCancel = null },
+            onConfirmCancel = { orderId, onResult ->
+                onCancelDelivery(orderId, onResult)
+            }
+        )
+    }
 }
 
 @Composable
@@ -210,7 +229,9 @@ fun DeliveryCard(
     isClaimed: Boolean,
     onClaim: () -> Unit,
     onOpenMap: () -> Unit,
-    onUpdateStatus: (OrderStatus) -> Unit
+    onUpdateStatus: (OrderStatus) -> Unit,
+    onCancelDelivery: () -> Unit = {},
+    onReportIssue: () -> Unit = {}
 ) {
     Card(
         shape = RoundedCornerShape(18.dp),
@@ -269,19 +290,36 @@ fun DeliveryCard(
                     Text("Accept & Claim Trip", fontWeight = FontWeight.Bold)
                 }
             } else {
-                // Open Map Navigation button for claimed trips
-                OutlinedButton(
-                    onClick = onOpenMap,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("open_delivery_map_button"),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = GreenPrimary),
-                    border = androidx.compose.foundation.BorderStroke(1.5.dp, GreenPrimary)
+                // Map Navigation and Report Issue buttons for claimed trips
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Map, contentDescription = "Map Navigation", modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Open Live In-App Map Navigation", fontWeight = FontWeight.Bold)
+                    OutlinedButton(
+                        onClick = onOpenMap,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("open_delivery_map_button"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = GreenPrimary),
+                        border = androidx.compose.foundation.BorderStroke(1.5.dp, GreenPrimary)
+                    ) {
+                        Icon(Icons.Default.Map, contentDescription = "Map Navigation", modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Live Map", fontWeight = FontWeight.Bold)
+                    }
+
+                    OutlinedButton(
+                        onClick = onReportIssue,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCA5A5))
+                    ) {
+                        Icon(Icons.Default.ReportProblem, contentDescription = "Report Issue", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Report Issue", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
                 }
 
                 Row(
@@ -289,11 +327,22 @@ fun DeliveryCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     when (order.status) {
-                        OrderStatus.PICKED_UP -> {
+                        OrderStatus.READY, OrderStatus.PICKED_UP -> {
+                            OutlinedButton(
+                                onClick = onCancelDelivery,
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Cancel", fontWeight = FontWeight.Bold)
+                            }
                             Button(
                                 onClick = { onUpdateStatus(OrderStatus.OUT_FOR_DELIVERY) },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1.2f),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
                                 Text("Start Route")
