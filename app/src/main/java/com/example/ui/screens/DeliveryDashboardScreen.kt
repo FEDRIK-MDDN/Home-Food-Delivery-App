@@ -43,12 +43,13 @@ fun DeliveryDashboardScreen(
         orders.filter {
             it.status == OrderStatus.READY &&
             it.deliveryId.isNullOrEmpty()
-        }
+        }.sortedByDescending { it.createdAt }
     }
 
     // Active deliveries claimed by this partner
     val myDeliveries = remember(orders, currentUser) {
         orders.filter { it.deliveryId == currentUser.userId || ((it.deliveryPartnerName?.contains(currentUser.name, ignoreCase = true) == true) && !it.deliveryId.isNullOrEmpty()) }
+            .sortedByDescending { it.createdAt }
     }
 
     val totalEarnings = myDeliveries.filter { it.status == OrderStatus.DELIVERED || it.status == OrderStatus.COMPLETED }.sumOf { it.deliveryFee }

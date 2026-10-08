@@ -52,6 +52,7 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
     val allUsers       by viewModel.users.collectAsState()
     val authError      by viewModel.authError.collectAsState()
     val deliveryIssues by viewModel.deliveryIssues.collectAsState()
+    val promos         by viewModel.promos.collectAsState()
 
     var preselectedIssueOrderId by remember { mutableStateOf<String?>(null) }
 
@@ -220,14 +221,23 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
 
                 "cook_dashboard" -> currentUser?.let { user ->
                     CookDashboardScreen(
-                        currentUser          = user,
-                        orders               = orders,
-                        foods                = foods,
-                        onUpdateOrderStatus  = { orderId, status -> viewModel.updateOrderStatus(orderId, status) },
-                        onAddFood            = { viewModel.addFoodByCook(it) },
-                        onUpdateFood         = { viewModel.updateFood(it) },
+                        currentUser              = user,
+                        orders                   = orders,
+                        foods                    = foods,
+                        promos                   = promos,
+                        onUpdateOrderStatus      = { orderId, status -> viewModel.updateOrderStatus(orderId, status) },
+                        onAddFood                = { viewModel.addFoodByCook(it) },
+                        onUpdateFood             = { viewModel.updateFood(it) },
                         onToggleFoodAvailability = { viewModel.toggleFoodAvailability(it) },
-                        onDeleteFood         = { viewModel.deleteFood(it) }
+                        onDeleteFood             = { viewModel.deleteFood(it) },
+                        onCreatePromo            = { code, title, desc, type, valD, minO, dur, limit, onRes ->
+                            viewModel.createPromo(code, title, desc, type, valD, minO, dur, limit, onRes)
+                        },
+                        onUpdatePromo            = { pId, title, desc, type, valD, minO, ext, act, onRes ->
+                            viewModel.updatePromo(pId, title, desc, type, valD, minO, ext, act, onRes)
+                        },
+                        onTogglePromoStatus      = { pId, onRes -> viewModel.togglePromoStatus(pId, onRes) },
+                        onDeletePromo            = { pId, onRes -> viewModel.deletePromo(pId, onRes) }
                     )
                 }
 
@@ -329,7 +339,7 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
                     onBackClick     = { viewModel.navigateTo("customer_home") },
                     onUpdateQuantity = { foodId, qty -> viewModel.updateCartQuantity(foodId, qty) },
                     onRemoveItem    = { foodId -> viewModel.removeCartItem(foodId) },
-                    onApplyPromo    = { code -> viewModel.applyPromoCode(code) },
+                    onApplyPromo    = { code, onRes -> viewModel.applyPromoCode(code, onRes) },
                     onProceedToCheckout = { viewModel.navigateTo("checkout") }
                 )
 

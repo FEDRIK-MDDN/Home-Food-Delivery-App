@@ -114,7 +114,7 @@ fun OrdersScreen(
                 }
                 else        -> roleFilteredOrders
             }
-        }
+        }.sortedByDescending { it.createdAt }
     }
 
     // ── Screen title per role ──────────────────────────────────────────────────

@@ -40,7 +40,7 @@ fun CartScreen(
     onBackClick: () -> Unit,
     onUpdateQuantity: (String, Int) -> Unit,
     onRemoveItem: (String) -> Unit,
-    onApplyPromo: (String) -> Boolean,
+    onApplyPromo: (String, (isSuccess: Boolean, message: String) -> Unit) -> Unit,
     onProceedToCheckout: () -> Unit
 ) {
     var promoInput by remember { mutableStateOf(appliedPromoCode) }
@@ -353,8 +353,14 @@ fun CartScreen(
 
                             Button(
                                 onClick = {
-                                    val ok = onApplyPromo(promoInput)
-                                    promoMessage = if (ok) "Promo HOMECOOK10 Applied! -$2.00" else "Invalid Promo Code"
+                                    val clean = promoInput.trim()
+                                    if (clean.isBlank()) {
+                                        promoMessage = "Please enter a promo code"
+                                        return@Button
+                                    }
+                                    onApplyPromo(clean) { success, msg ->
+                                        promoMessage = msg
+                                    }
                                 },
                                 modifier = Modifier.height(52.dp),
                                 shape = RoundedCornerShape(20.dp),
@@ -370,10 +376,11 @@ fun CartScreen(
 
                         promoMessage?.let {
                             Spacer(modifier = Modifier.height(4.dp))
+                            val isSuccess = it.contains("Applied", ignoreCase = true)
                             Text(
                                 text = it,
                                 fontSize = 12.sp,
-                                color = if (it.contains("Applied")) GreenPrimary else CoralPrice,
+                                color = if (isSuccess) GreenPrimary else CoralPrice,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }

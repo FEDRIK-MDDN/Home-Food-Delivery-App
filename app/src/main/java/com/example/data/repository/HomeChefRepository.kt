@@ -25,6 +25,7 @@ private const val COL_FOODS         = "foods"
 private const val COL_ORDERS          = "orders"
 private const val COL_NOTIFICATIONS   = "notifications"
 private const val COL_DELIVERY_ISSUES = "delivery_issues"
+private const val COL_PROMOS          = "kitchen_promos"
 
 private val DUMMY_FOOD_IDS = setOf("f_sarah_01", "f_001", "f_002", "f_003", "f_004", "f_005")
 private val DUMMY_COOK_IDS = setOf("cook_001", "cook_002")
@@ -46,6 +47,7 @@ class HomeChefRepository(private val context: Context) {
     private var cartListener: ListenerRegistration? = null
     private var favoritesListener: ListenerRegistration? = null
     private var issuesListener: ListenerRegistration? = null
+    private var promosListener: ListenerRegistration? = null
 
     // ─── State Flows ──────────────────────────────────────────────────────────
     private val _currentUser = MutableStateFlow<User?>(null)
@@ -65,6 +67,9 @@ class HomeChefRepository(private val context: Context) {
 
     private val _deliveryIssues = MutableStateFlow<List<DeliveryIssue>>(emptyList())
     val deliveryIssues: StateFlow<List<DeliveryIssue>> = _deliveryIssues.asStateFlow()
+
+    private val _promos = MutableStateFlow<List<PromoCode>>(emptyList())
+    val promos: StateFlow<List<PromoCode>> = _promos.asStateFlow()
 
     // ─── Cart & Favorites (Firestore-backed, cloud-synced) ────────────────────
     private val _favoriteFoodIds = MutableStateFlow<List<String>>(emptyList())
@@ -193,6 +198,7 @@ class HomeChefRepository(private val context: Context) {
                 }
                 if (snap != null)
                     _orders.value = snap.documents.mapNotNull { it.toOrder() }
+                        .sortedByDescending { it.createdAt }
             }
         // Users (admin)
         usersListener = firestore.collection(COL_USERS)
@@ -203,6 +209,19 @@ class HomeChefRepository(private val context: Context) {
                 }
                 if (snap != null)
                     _users.value = snap.documents.mapNotNull { it.toUser() }
+            }
+        // Promos (kitchen promo deals & discount vouchers)
+        promosListener?.remove()
+        promosListener = firestore.collection(COL_PROMOS)
+            .addSnapshotListener { snap, error ->
+                if (error != null) {
+                    android.util.Log.w("HomeChef", "Promos listener error: ${error.message}")
+                    return@addSnapshotListener
+                }
+                if (snap != null) {
+                    _promos.value = snap.documents.mapNotNull { it.toPromoCode() }
+                        .sortedByDescending { it.createdAt }
+                }
             }
     }
 
@@ -298,10 +317,12 @@ class HomeChefRepository(private val context: Context) {
         cartListener?.remove()
         favoritesListener?.remove()
         issuesListener?.remove()
+        promosListener?.remove()
         _cartItems.value = emptyList()
         _favoriteFoodIds.value = emptyList()
         _notifications.value = emptyList()
         _deliveryIssues.value = emptyList()
+        _promos.value = emptyList()
     }
 
     // Seeds admin account into Firebase Auth + Firestore on first launch
@@ -828,7 +849,8 @@ class HomeChefRepository(private val context: Context) {
         deliveryAddress: String,
         paymentMethod: String,
         notesForCook: String,
-        promoDiscount: Double = 0.0
+        promoDiscount: Double = 0.0,
+        appliedPromoCode: String = ""
     ): List<String> {
         val user        = _currentUser.value ?: return emptyList()
         val currentCart = cartItems.value
@@ -884,6 +906,36 @@ class HomeChefRepository(private val context: Context) {
                 ).await()
             }
             createdOrderIds.add(orderId)
+        }
+
+        // Auto-update promo redeem count when customer applied promo code
+        if (appliedPromoCode.isNotBlank()) {
+            val codeToRedeem = appliedPromoCode.trim().uppercase()
+            scope.launch {
+                try {
+                    val promoQuery = firestore.collection(COL_PROMOS)
+                        .whereEqualTo("code", codeToRedeem)
+                        .limit(1)
+                        .get()
+                        .await()
+                    if (!promoQuery.isEmpty) {
+                        val doc = promoQuery.documents.first()
+                        doc.reference.update("usageCount", FieldValue.increment(1)).await()
+                        android.util.Log.d("HomeChef", "Customer order auto updated redeem count for promo: $codeToRedeem")
+                    } else {
+                        android.util.Log.w("HomeChef", "Promo $codeToRedeem not found in $COL_PROMOS to increment.")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("HomeChef", "Error auto-incrementing promo redeem count: ${e.message}", e)
+                }
+
+                // Immediately update local StateFlow so cook dashboard updates in real time
+                _promos.value = _promos.value.map { promo ->
+                    if (promo.code.equals(codeToRedeem, ignoreCase = true)) {
+                        promo.copy(usageCount = promo.usageCount + 1)
+                    } else promo
+                }
+            }
         }
 
         clearCart()
@@ -1059,6 +1111,165 @@ class HomeChefRepository(private val context: Context) {
         } catch (e: Exception) {
             android.util.Log.e("HomeChef", "deleteDeliveryIssue error: ${e.message}", e)
             e.localizedMessage ?: "Failed to withdraw issue report."
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // COOK PROMOTIONS & DEALS — Firestore CRUD
+    // ─────────────────────────────────────────────────────────────────────────
+
+    suspend fun createPromo(
+        code: String,
+        title: String,
+        description: String,
+        discountType: String = "PERCENTAGE",
+        discountValue: Double = 10.0,
+        minOrderValue: Double = 0.0,
+        durationDays: Int = 7,
+        maxUsageLimit: Int = 50
+    ): String? = withContext(Dispatchers.IO) {
+        try {
+            val user = _currentUser.value ?: return@withContext "You must be logged in to create promotions."
+            val cleanCode = code.trim().uppercase().replace(" ", "")
+            if (cleanCode.length < 3) return@withContext "Promo code must be at least 3 characters."
+            if (discountValue <= 0) return@withContext "Discount amount must be greater than 0."
+            if (discountType == "PERCENTAGE" && discountValue > 90) return@withContext "Percentage discount cannot exceed 90%."
+
+            // Check duplicate code
+            val existing = _promos.value.find { it.code.equals(cleanCode, ignoreCase = true) && !it.isExpired }
+            if (existing != null) {
+                return@withContext "An active promo with code '$cleanCode' already exists."
+            }
+
+            val promoId = "promo_${UUID.randomUUID().toString().take(8)}"
+            val now = System.currentTimeMillis()
+            val end = now + (durationDays.toLong() * 24 * 60 * 60 * 1000)
+
+            val promo = PromoCode(
+                promoId        = promoId,
+                cookId         = user.userId,
+                cookName       = user.name,
+                code           = cleanCode,
+                title          = title.trim().ifBlank { "$cleanCode Special" },
+                description    = description.trim(),
+                discountType   = discountType,
+                discountValue  = discountValue,
+                minOrderValue  = minOrderValue,
+                startDate      = now,
+                endDate        = end,
+                isActive       = true,
+                usageCount     = 0,
+                maxUsageLimit  = maxUsageLimit,
+                createdAt      = now
+            )
+
+            firestore.collection(COL_PROMOS).document(promoId).set(promo.toMap()).await()
+            _promos.value = (listOf(promo) + _promos.value.filterNot { it.promoId == promoId })
+            android.util.Log.d("HomeChef", "Promo created: $promoId ($cleanCode)")
+            null
+        } catch (e: Exception) {
+            android.util.Log.e("HomeChef", "createPromo error: ${e.message}", e)
+            e.localizedMessage ?: "Failed to create promo code."
+        }
+    }
+
+    suspend fun updatePromo(
+        promoId: String,
+        title: String,
+        description: String,
+        discountType: String,
+        discountValue: Double,
+        minOrderValue: Double,
+        extendDays: Int = 0,
+        isActive: Boolean = true
+    ): String? = withContext(Dispatchers.IO) {
+        try {
+            val current = _promos.value.find { it.promoId == promoId }
+                ?: return@withContext "Promo deal not found."
+
+            val newEndDate = if (extendDays > 0) {
+                val base = if (current.isExpired) System.currentTimeMillis() else current.endDate
+                base + (extendDays.toLong() * 24 * 60 * 60 * 1000)
+            } else current.endDate
+
+            val updates = mapOf(
+                "title"         to title.trim(),
+                "description"   to description.trim(),
+                "discountType"  to discountType,
+                "discountValue" to discountValue,
+                "minOrderValue" to minOrderValue,
+                "endDate"       to newEndDate,
+                "isActive"      to isActive
+            )
+
+            firestore.collection(COL_PROMOS).document(promoId).update(updates).await()
+            _promos.value = _promos.value.map {
+                if (it.promoId == promoId) {
+                    it.copy(
+                        title         = title.trim(),
+                        description   = description.trim(),
+                        discountType  = discountType,
+                        discountValue = discountValue,
+                        minOrderValue = minOrderValue,
+                        endDate       = newEndDate,
+                        isActive      = isActive
+                    )
+                } else it
+            }
+            android.util.Log.d("HomeChef", "Promo updated: $promoId")
+            null
+        } catch (e: Exception) {
+            android.util.Log.e("HomeChef", "updatePromo error: ${e.message}", e)
+            e.localizedMessage ?: "Failed to update promo."
+        }
+    }
+
+    suspend fun togglePromoStatus(promoId: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val current = _promos.value.find { it.promoId == promoId }
+                ?: return@withContext "Promo deal not found."
+            val newStatus = !current.isActive
+            firestore.collection(COL_PROMOS).document(promoId).update("isActive", newStatus).await()
+            _promos.value = _promos.value.map {
+                if (it.promoId == promoId) it.copy(isActive = newStatus) else it
+            }
+            null
+        } catch (e: Exception) {
+            e.localizedMessage ?: "Failed to toggle promo status."
+        }
+    }
+
+    suspend fun deletePromo(promoId: String): String? = withContext(Dispatchers.IO) {
+        try {
+            firestore.collection(COL_PROMOS).document(promoId).delete().await()
+            _promos.value = _promos.value.filterNot { it.promoId == promoId }
+            android.util.Log.d("HomeChef", "Promo deleted: $promoId")
+            null
+        } catch (e: Exception) {
+            android.util.Log.e("HomeChef", "deletePromo error: ${e.message}", e)
+            e.localizedMessage ?: "Failed to delete promo."
+        }
+    }
+
+    suspend fun findPromoInFirestore(code: String): PromoCode? = withContext(Dispatchers.IO) {
+        try {
+            val clean = code.trim().uppercase().replace(" ", "")
+            val query = firestore.collection(COL_PROMOS)
+                .whereEqualTo("code", clean)
+                .limit(1)
+                .get()
+                .await()
+            if (!query.isEmpty) {
+                val promo = query.documents.first().toPromoCode()
+                if (promo != null) {
+                    _promos.value = (listOf(promo) + _promos.value.filterNot { it.promoId == promo.promoId })
+                    return@withContext promo
+                }
+            }
+            null
+        } catch (e: Exception) {
+            android.util.Log.e("HomeChef", "findPromoInFirestore failed: ${e.message}", e)
+            null
         }
     }
 
@@ -1450,7 +1661,7 @@ private fun com.google.firebase.firestore.DocumentSnapshot.toOrder(): Order? = t
         deliveryId          = getString("deliveryId"),
         deliveryPartnerName = getString("deliveryPartnerName"),
         rejectReason        = getString("rejectReason"),
-        createdAt           = getLong("createdAt") ?: 0L,
+        createdAt           = getLong("createdAt")?.takeIf { it > 0L } ?: System.currentTimeMillis(),
         cancelledDriverIds  = cancelledDriverIds
     )
 } catch (e: Exception) { null }
@@ -1493,6 +1704,46 @@ private fun DeliveryIssue.toMap(): Map<String, Any?> = mapOf(
     "status"      to status,
     "createdAt"   to createdAt,
     "updatedAt"   to updatedAt
+)
+
+private fun com.google.firebase.firestore.DocumentSnapshot.toPromoCode(): PromoCode? = try {
+    val endVal = getLong("endDate") ?: 0L
+    val finalEnd = if (endVal > 0L) endVal else (System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000)
+    PromoCode(
+        promoId       = getString("promoId") ?: id,
+        cookId        = getString("cookId") ?: "",
+        cookName      = getString("cookName") ?: "",
+        code          = getString("code") ?: "",
+        title         = getString("title") ?: "",
+        description   = getString("description") ?: "",
+        discountType  = getString("discountType") ?: "PERCENTAGE",
+        discountValue = getDouble("discountValue") ?: 10.0,
+        minOrderValue = getDouble("minOrderValue") ?: 0.0,
+        startDate     = getLong("startDate") ?: System.currentTimeMillis(),
+        endDate       = finalEnd,
+        isActive      = getBoolean("isActive") ?: true,
+        usageCount    = getLong("usageCount")?.toInt() ?: 0,
+        maxUsageLimit = getLong("maxUsageLimit")?.toInt() ?: 50,
+        createdAt     = getLong("createdAt") ?: System.currentTimeMillis()
+    )
+} catch (e: Exception) { null }
+
+private fun PromoCode.toMap(): Map<String, Any?> = mapOf(
+    "promoId"       to promoId,
+    "cookId"        to cookId,
+    "cookName"      to cookName,
+    "code"          to code,
+    "title"         to title,
+    "description"   to description,
+    "discountType"  to discountType,
+    "discountValue" to discountValue,
+    "minOrderValue" to minOrderValue,
+    "startDate"     to startDate,
+    "endDate"       to endDate,
+    "isActive"      to isActive,
+    "usageCount"    to usageCount,
+    "maxUsageLimit" to maxUsageLimit,
+    "createdAt"     to createdAt
 )
 
 // ─── Domain model → Firestore Map ─────────────────────────────────────────────

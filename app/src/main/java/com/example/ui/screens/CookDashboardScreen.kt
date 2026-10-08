@@ -34,10 +34,17 @@ import coil.request.ImageRequest
 import com.example.data.model.Food
 import com.example.data.model.Order
 import com.example.data.model.OrderStatus
+import com.example.data.model.PromoCode
 import com.example.data.model.User
+import com.example.ui.components.CreatePromoDialog
+import com.example.ui.components.DeletePromoDialog
+import com.example.ui.components.EditPromoDialog
 import com.example.ui.theme.GreenContainer
 import com.example.ui.theme.GreenPrimary
 import com.example.util.ImageUtils
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -48,26 +55,50 @@ fun CookDashboardScreen(
     currentUser: User,
     orders: List<Order>,
     foods: List<Food>,
+    promos: List<PromoCode> = emptyList(),
     onUpdateOrderStatus: (orderId: String, newStatus: OrderStatus) -> Unit,
     onAddFood: (Food) -> Unit,
     onUpdateFood: (Food) -> Unit = {},
     onToggleFoodAvailability: (foodId: String) -> Unit,
-    onDeleteFood: (foodId: String) -> Unit
+    onDeleteFood: (foodId: String) -> Unit,
+    onCreatePromo: (code: String, title: String, description: String, discountType: String, discountValue: Double, minOrderValue: Double, durationDays: Int, maxUsageLimit: Int, onResult: (String?) -> Unit) -> Unit = { _, _, _, _, _, _, _, _, _ -> },
+    onUpdatePromo: (promoId: String, title: String, description: String, discountType: String, discountValue: Double, minOrderValue: Double, extendDays: Int, isActive: Boolean, onResult: (String?) -> Unit) -> Unit = { _, _, _, _, _, _, _, _, _ -> },
+    onTogglePromoStatus: (promoId: String, onResult: (String?) -> Unit) -> Unit = { _, _ -> },
+    onDeletePromo: (promoId: String, onResult: (String?) -> Unit) -> Unit = { _, _ -> }
 ) {
     var selectedTab by remember { mutableStateOf("Kitchen Orders") }
     var showAddDishDialog by remember { mutableStateOf(false) }
     var editingFood by remember { mutableStateOf<Food?>(null) }
     var foodToDelete by remember { mutableStateOf<Food?>(null) }
 
+    var showCreatePromoDialog by remember { mutableStateOf(false) }
+    var promoToEdit by remember { mutableStateOf<PromoCode?>(null) }
+    var promoToDelete by remember { mutableStateOf<PromoCode?>(null) }
+    var selectedPromoFilter by remember { mutableStateOf("All") }
+
     // Filter orders for this cook — use cookId only (exact match) to prevent
     // cross-assignment when cook names partially overlap (Bug 9 fix).
     val cookOrders = remember(orders, currentUser) {
         orders.filter { it.cookId == currentUser.userId }
+            .sortedByDescending { it.createdAt }
     }
 
     // Filter foods by this cook — cookId only (Bug 9 fix)
     val cookFoods = remember(foods, currentUser) {
         foods.filter { it.cookId == currentUser.userId }
+    }
+
+    // Filter promos by this cook
+    val cookPromos = remember(promos, currentUser) {
+        promos.filter { it.cookId == currentUser.userId }
+    }
+
+    val filteredPromos = remember(cookPromos, selectedPromoFilter) {
+        when (selectedPromoFilter) {
+            "Active" -> cookPromos.filter { it.isActive && !it.isExpired }
+            "Paused / Expired" -> cookPromos.filter { !it.isActive || it.isExpired }
+            else -> cookPromos
+        }
     }
 
     val todayRevenue = cookOrders.filter { it.status != OrderStatus.CANCELLED }.sumOf { it.subtotal }
@@ -92,18 +123,34 @@ fun CookDashboardScreen(
                     }
                 },
                 actions = {
-                    // Bug 4 fix: Only approved cooks can add new dishes
                     if (currentUser.isApprovedCook) {
-                        IconButton(
-                            onClick = { showAddDishDialog = true },
-                            modifier = Modifier.testTag("add_dish_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AddCircle,
-                                contentDescription = "Add Dish",
-                                tint = GreenPrimary,
-                                modifier = Modifier.size(28.dp)
-                            )
+                        if (selectedTab == "Deals & Promos") {
+                            FilledTonalButton(
+                                onClick = { showCreatePromoDialog = true },
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = GreenContainer,
+                                    contentColor = GreenPrimary
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.padding(end = 8.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("New Deal", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            IconButton(
+                                onClick = { showAddDishDialog = true },
+                                modifier = Modifier.testTag("add_dish_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AddCircle,
+                                    contentDescription = "Add Dish",
+                                    tint = GreenPrimary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
                         }
                     }
                 },
@@ -198,133 +245,276 @@ fun CookDashboardScreen(
             }
 
             // Tabs Selector
+            val selectedTabIndex = when (selectedTab) {
+                "Kitchen Orders"   -> 0
+                "My Menu"          -> 1
+                "Deals & Promos"   -> 2
+                else               -> 0
+            }
             TabRow(
-                selectedTabIndex = if (selectedTab == "Kitchen Orders") 0 else 1,
+                selectedTabIndex = selectedTabIndex,
                 containerColor = Color.White,
                 contentColor = GreenPrimary
             ) {
                 Tab(
                     selected = selectedTab == "Kitchen Orders",
                     onClick = { selectedTab = "Kitchen Orders" },
-                    text = { Text("Kitchen Orders (${cookOrders.size})", fontWeight = FontWeight.Bold) }
+                    text = { Text("Orders (${cookOrders.size})", fontWeight = FontWeight.Bold, fontSize = 13.sp) }
                 )
                 Tab(
                     selected = selectedTab == "My Menu",
                     onClick = { selectedTab = "My Menu" },
-                    text = { Text("My Menu (${cookFoods.size})", fontWeight = FontWeight.Bold) }
+                    text = { Text("Menu (${cookFoods.size})", fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                )
+                Tab(
+                    selected = selectedTab == "Deals & Promos",
+                    onClick = { selectedTab = "Deals & Promos" },
+                    text = { Text("Deals & Promos (${cookPromos.size})", fontWeight = FontWeight.Bold, fontSize = 13.sp) }
                 )
             }
 
-            if (selectedTab == "Kitchen Orders") {
-                // Bug 4 fix: Unapproved cooks see a pending-approval notice instead
-                // of being able to operate the kitchen.
-                if (!currentUser.isApprovedCook) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(32.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.HourglassEmpty,
-                                contentDescription = null,
-                                tint = Color(0xFFD97706),
-                                modifier = Modifier.size(64.dp)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                "Pending Admin Approval",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
-                                color = Color(0xFFD97706)
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                "Your kitchen is under review. You can\u2019t accept orders until an admin approves your account.",
-                                fontSize = 14.sp,
-                                color = Color(0xFF64748B),
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                        }
-                    }
-                } else if (cookOrders.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.Restaurant, contentDescription = null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(64.dp))
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text("No incoming kitchen orders yet", fontWeight = FontWeight.Bold, color = Color(0xFF64748B))
-                        }
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(cookOrders, key = { it.orderId }) { order ->
-                            CookOrderCard(
-                                order = order,
-                                onUpdateStatus = { newStatus -> onUpdateOrderStatus(order.orderId, newStatus) }
-                            )
-                        }
-                    }
-                }
-            } else if (cookFoods.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            imageVector = Icons.Default.RestaurantMenu,
-                            contentDescription = null,
-                            tint = Color(0xFFCBD5E1),
-                            modifier = Modifier.size(64.dp)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "No dishes in your menu yet",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp,
-                            color = Color(0xFF64748B)
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Add your signature homemade dishes so customers can order!",
-                            fontSize = 14.sp,
-                            color = Color(0xFF94A3B8),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                        if (currentUser.isApprovedCook) {
-                            Spacer(modifier = Modifier.height(20.dp))
-                            Button(
-                                onClick = { showAddDishDialog = true },
-                                colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
-                                shape = RoundedCornerShape(12.dp)
+            when (selectedTab) {
+                "Kitchen Orders" -> {
+                    if (!currentUser.isApprovedCook) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(32.dp)
                             ) {
-                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Add Your First Dish", fontWeight = FontWeight.Bold)
+                                Icon(
+                                    Icons.Default.HourglassEmpty,
+                                    contentDescription = null,
+                                    tint = Color(0xFFD97706),
+                                    modifier = Modifier.size(64.dp)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    "Pending Admin Approval",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp,
+                                    color = Color(0xFFD97706)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    "Your kitchen is under review. You can\u2019t accept orders until an admin approves your account.",
+                                    fontSize = 14.sp,
+                                    color = Color(0xFF64748B),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+                    } else if (cookOrders.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.Restaurant, contentDescription = null, tint = Color(0xFFCBD5E1), modifier = Modifier.size(64.dp))
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text("No incoming kitchen orders yet", fontWeight = FontWeight.Bold, color = Color(0xFF64748B))
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            items(cookOrders, key = { it.orderId }) { order ->
+                                CookOrderCard(
+                                    order = order,
+                                    onUpdateStatus = { newStatus -> onUpdateOrderStatus(order.orderId, newStatus) }
+                                )
                             }
                         }
                     }
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    items(cookFoods, key = { it.foodId }) { food ->
-                        CookFoodItemCard(
-                            food = food,
-                            onToggleAvailability = { onToggleFoodAvailability(food.foodId) },
-                            onEdit = { editingFood = food },
-                            onDelete = { foodToDelete = food }
-                        )
+
+                "My Menu" -> {
+                    if (cookFoods.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Default.RestaurantMenu,
+                                    contentDescription = null,
+                                    tint = Color(0xFFCBD5E1),
+                                    modifier = Modifier.size(64.dp)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "No dishes in your menu yet",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp,
+                                    color = Color(0xFF64748B)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Add your signature homemade dishes so customers can order!",
+                                    fontSize = 14.sp,
+                                    color = Color(0xFF94A3B8),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                                if (currentUser.isApprovedCook) {
+                                    Spacer(modifier = Modifier.height(20.dp))
+                                    Button(
+                                        onClick = { showAddDishDialog = true },
+                                        colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Add Your First Dish", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            items(cookFoods, key = { it.foodId }) { food ->
+                                CookFoodItemCard(
+                                    food = food,
+                                    onToggleAvailability = { onToggleFoodAvailability(food.foodId) },
+                                    onEdit = { editingFood = food },
+                                    onDelete = { foodToDelete = food }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                "Deals & Promos" -> {
+                    if (!currentUser.isApprovedCook) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.HourglassEmpty,
+                                    contentDescription = null,
+                                    tint = Color(0xFFD97706),
+                                    modifier = Modifier.size(64.dp)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    "Pending Admin Approval",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp,
+                                    color = Color(0xFFD97706)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    "Only approved kitchens can publish promotions and discount codes.",
+                                    fontSize = 14.sp,
+                                    color = Color(0xFF64748B),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+                    } else {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            // Filter row
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color.White)
+                                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf("All", "Active", "Paused / Expired").forEach { filter ->
+                                    val isSel = selectedPromoFilter == filter
+                                    Surface(
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = if (isSel) GreenPrimary else Color(0xFFF1F5F9),
+                                        modifier = Modifier.clickable { selectedPromoFilter = filter }
+                                    ) {
+                                        Text(
+                                            text = filter,
+                                            color = if (isSel) Color.White else Color(0xFF64748B),
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                            fontSize = 12.sp,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (filteredPromos.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(32.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(72.dp)
+                                                .clip(CircleShape)
+                                                .background(GreenContainer),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.LocalOffer,
+                                                contentDescription = null,
+                                                tint = GreenPrimary,
+                                                modifier = Modifier.size(36.dp)
+                                            )
+                                        }
+                                        Text(
+                                            text = if (selectedPromoFilter == "All") "No Promotions Created Yet" else "No $selectedPromoFilter Deals",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 18.sp,
+                                            color = Color(0xFF0F172A)
+                                        )
+                                        Text(
+                                            text = "Offer lunch combo deals or discount codes (e.g. 15% OFF) to attract nearby customers!",
+                                            fontSize = 14.sp,
+                                            color = Color(0xFF64748B),
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        )
+                                        Button(
+                                            onClick = { showCreatePromoDialog = true },
+                                            colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Create Your First Deal", fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            } else {
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                                ) {
+                                    items(filteredPromos, key = { it.promoId }) { promo ->
+                                        CookPromoCard(
+                                            promo = promo,
+                                            onToggleStatus = {
+                                                onTogglePromoStatus(promo.promoId) { }
+                                            },
+                                            onEdit = { promoToEdit = promo },
+                                            onDelete = { promoToDelete = promo }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -375,6 +565,255 @@ fun CookDashboardScreen(
                 TextButton(onClick = { foodToDelete = null }) { Text("Cancel") }
             }
         )
+    }
+
+    if (showCreatePromoDialog) {
+        CreatePromoDialog(
+            onDismiss = { showCreatePromoDialog = false },
+            onCreate = { code, title, desc, type, valD, minO, dur, limit, onRes ->
+                onCreatePromo(code, title, desc, type, valD, minO, dur, limit, onRes)
+            }
+        )
+    }
+
+    promoToEdit?.let { promo ->
+        EditPromoDialog(
+            promo = promo,
+            onDismiss = { promoToEdit = null },
+            onSave = { pId, title, desc, type, valD, minO, ext, act, onRes ->
+                onUpdatePromo(pId, title, desc, type, valD, minO, ext, act, onRes)
+            }
+        )
+    }
+
+    promoToDelete?.let { promo ->
+        DeletePromoDialog(
+            promo = promo,
+            onDismiss = { promoToDelete = null },
+            onConfirmDelete = { pId, onRes ->
+                onDeletePromo(pId, onRes)
+            }
+        )
+    }
+}
+
+@Composable
+fun CookPromoCard(
+    promo: PromoCode,
+    onToggleStatus: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val dateFormat = remember { SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()) }
+    val formattedEnd = remember(promo.endDate) { dateFormat.format(Date(promo.endDate)) }
+    val daysLeft = remember(promo.endDate) {
+        val diff = promo.endDate - System.currentTimeMillis()
+        (diff / (24 * 60 * 60 * 1000)).coerceAtLeast(0)
+    }
+
+    val statusColor = when {
+        promo.isExpired -> Color(0xFFDC2626)
+        !promo.isActive -> Color(0xFFD97706)
+        else -> Color(0xFF16A34A)
+    }
+    val statusBg = when {
+        promo.isExpired -> Color(0xFFFEE2E2)
+        !promo.isActive -> Color(0xFFFEF3C7)
+        else -> Color(0xFFDCFCE7)
+    }
+    val statusText = when {
+        promo.isExpired -> "EXPIRED"
+        !promo.isActive -> "PAUSED"
+        else -> "ACTIVE"
+    }
+
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Header: Discount badge & Status tag
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = GreenContainer
+                ) {
+                    Text(
+                        text = promo.discountLabel,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 15.sp,
+                        color = GreenPrimary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = statusBg
+                ) {
+                    Text(
+                        text = statusText,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = statusColor,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            // Coupon Code Banner
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFFF8FAFC),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.ConfirmationNumber, contentDescription = null, tint = GreenPrimary, modifier = Modifier.size(18.dp))
+                        Text(
+                            text = promo.code,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 16.sp,
+                            color = Color(0xFF0F172A),
+                            letterSpacing = 1.sp
+                        )
+                    }
+                    Text(
+                        text = if (promo.minOrderValue > 0) "$${String.format("%.2f", promo.minOrderValue)} min order" else "No min order",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
+            // Title & Description
+            Text(
+                text = promo.title,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = Color(0xFF0F172A)
+            )
+            if (promo.description.isNotBlank()) {
+                Text(
+                    text = promo.description,
+                    fontSize = 13.sp,
+                    color = Color(0xFF475569),
+                    lineHeight = 18.sp
+                )
+            }
+
+            // Meta Info: Redemptions & Expiration
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.PeopleOutline, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "${promo.usageCount}/${promo.maxUsageLimit} redeemed",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.AccessTime, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (promo.isExpired) "Expired" else "$daysLeft days left • $formattedEnd",
+                        fontSize = 12.sp,
+                        color = if (promo.isExpired) Color(0xFFDC2626) else Color(0xFF64748B),
+                        fontWeight = if (promo.isExpired) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+            }
+
+            HorizontalDivider(color = Color(0xFFF1F5F9))
+
+            // Action Buttons: Pause/Resume, Edit, Delete
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Toggle status button
+                OutlinedButton(
+                    onClick = onToggleStatus,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = if (promo.isActive) Color(0xFFD97706) else Color(0xFF16A34A)
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (promo.isActive) Color(0xFFFDE68A) else Color(0xFFBBF7D0)
+                    ),
+                    modifier = Modifier.weight(1.2f),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = if (promo.isActive) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (promo.isActive) "Pause" else "Resume",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+
+                // Edit button
+                OutlinedButton(
+                    onClick = onEdit,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEA580C)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFED7AA)),
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Edit", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+
+                // Delete button
+                OutlinedButton(
+                    onClick = onDelete,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                ) {
+                    Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Delete", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+            }
+        }
     }
 }
 

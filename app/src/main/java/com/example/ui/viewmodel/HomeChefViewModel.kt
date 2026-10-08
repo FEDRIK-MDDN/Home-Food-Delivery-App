@@ -37,6 +37,9 @@ class HomeChefViewModel(application: Application) : AndroidViewModel(application
     // Delivery Issues
     val deliveryIssues = repository.deliveryIssues
 
+    // Kitchen Promotions & Deals (Cook CRUD)
+    val promos = repository.promos
+
     // Navigation
     private val _currentScreen = MutableStateFlow("splash")
     val currentScreen: StateFlow<String> = _currentScreen.asStateFlow()
@@ -177,23 +180,94 @@ class HomeChefViewModel(application: Application) : AndroidViewModel(application
         repository.removeCartItem(foodId)
     }
 
-    fun applyPromoCode(code: String): Boolean {
-        return if (code.trim().equals("HOMECOOK10", ignoreCase = true) ||
-                   code.trim().equals("CAREEM20", ignoreCase = true)) {
-            _appliedPromoCode.value    = code.uppercase()
+    fun applyPromoCode(
+        code: String,
+        onResult: (isSuccess: Boolean, message: String) -> Unit = { _, _ -> }
+    ): Boolean {
+        val clean = code.trim().uppercase().replace(" ", "")
+        if (clean.isBlank()) {
+            onResult(false, "Please enter a promo code.")
+            return false
+        }
+        if (clean == "HOMECOOK10") {
+            _appliedPromoCode.value    = clean
             _promoDiscountAmount.value = 2.00
-            true
-        } else false
+            onResult(true, "Promo HOMECOOK10 Applied! -$2.00")
+            return true
+        }
+        if (clean == "CAREEM20") {
+            _appliedPromoCode.value    = clean
+            _promoDiscountAmount.value = 3.00
+            onResult(true, "Promo CAREEM20 Applied! -$3.00")
+            return true
+        }
+
+        // 1. Try finding in in-memory state
+        val inMemPromo = repository.promos.value.find { it.code.trim().uppercase().replace(" ", "") == clean }
+        if (inMemPromo != null) {
+            return validateAndApplyPromo(inMemPromo, onResult)
+        }
+
+        // 2. Query Firestore directly if not yet synced in memory
+        viewModelScope.launch {
+            val fsPromo = repository.findPromoInFirestore(clean)
+            if (fsPromo != null) {
+                validateAndApplyPromo(fsPromo, onResult)
+            } else {
+                onResult(false, "Promo code '$clean' not found.")
+            }
+        }
+        return false
+    }
+
+    private fun validateAndApplyPromo(
+        promo: PromoCode,
+        onResult: (isSuccess: Boolean, message: String) -> Unit
+    ): Boolean {
+        val clean = promo.code.trim().uppercase()
+        if (!promo.isActive) {
+            onResult(false, "Promo code '$clean' is currently paused by kitchen.")
+            return false
+        }
+        if (promo.isExpired) {
+            onResult(false, "Promo code '$clean' has expired.")
+            return false
+        }
+        if (promo.maxUsageLimit in 1..promo.usageCount) {
+            onResult(false, "Promo code '$clean' has reached its usage limit.")
+            return false
+        }
+
+        val subtotal = repository.cartItems.value.sumOf { it.price * it.quantity }
+        if (promo.minOrderValue > 0.0 && subtotal < promo.minOrderValue) {
+            onResult(false, "Minimum order of $${String.format("%.2f", promo.minOrderValue)} required (Cart: $${String.format("%.2f", subtotal)}).")
+            return false
+        }
+
+        val discount = if (promo.discountType == "PERCENTAGE") {
+            val base = if (subtotal > 0) subtotal else 20.0
+            (base * (promo.discountValue / 100.0)).coerceAtLeast(1.0)
+        } else {
+            promo.discountValue
+        }
+
+        _appliedPromoCode.value = clean
+        _promoDiscountAmount.value = discount
+        onResult(true, "Promo '$clean' Applied! -$${String.format("%.2f", discount)}")
+        return true
     }
 
     // ─── Checkout ─────────────────────────────────────────────────────────────
 
     fun checkout(deliveryAddress: String, paymentMethod: String, notesForCook: String): List<String> {
+        val appliedCode = _appliedPromoCode.value
+        val discount = _promoDiscountAmount.value
         val createdIds = repository.checkoutOrders(
-            deliveryAddress = deliveryAddress,
-            paymentMethod   = paymentMethod,
-            notesForCook    = notesForCook,
-            promoDiscount   = _promoDiscountAmount.value
+            deliveryAddress  = deliveryAddress,
+            paymentMethod    = paymentMethod,
+            notesForCook     = notesForCook,
+            promoDiscount    = discount,
+            appliedPromoCode = appliedCode
         )
         if (createdIds.isNotEmpty()) {
             _appliedPromoCode.value    = ""
@@ -269,6 +343,74 @@ class HomeChefViewModel(application: Application) : AndroidViewModel(application
     ) {
         viewModelScope.launch {
             val error = repository.deleteDeliveryIssue(issueId)
+            onResult(error)
+        }
+    }
+
+    // ─── Cook Promotions & Deals CRUD ──────────────────────────────────────────
+
+    fun createPromo(
+        code: String,
+        title: String,
+        description: String,
+        discountType: String = "PERCENTAGE",
+        discountValue: Double = 10.0,
+        minOrderValue: Double = 0.0,
+        durationDays: Int = 7,
+        maxUsageLimit: Int = 50,
+        onResult: (String?) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val error = repository.createPromo(
+                code = code,
+                title = title,
+                description = description,
+                discountType = discountType,
+                discountValue = discountValue,
+                minOrderValue = minOrderValue,
+                durationDays = durationDays,
+                maxUsageLimit = maxUsageLimit
+            )
+            onResult(error)
+        }
+    }
+
+    fun updatePromo(
+        promoId: String,
+        title: String,
+        description: String,
+        discountType: String,
+        discountValue: Double,
+        minOrderValue: Double,
+        extendDays: Int = 0,
+        isActive: Boolean = true,
+        onResult: (String?) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val error = repository.updatePromo(
+                promoId = promoId,
+                title = title,
+                description = description,
+                discountType = discountType,
+                discountValue = discountValue,
+                minOrderValue = minOrderValue,
+                extendDays = extendDays,
+                isActive = isActive
+            )
+            onResult(error)
+        }
+    }
+
+    fun togglePromoStatus(promoId: String, onResult: (String?) -> Unit = {}) {
+        viewModelScope.launch {
+            val error = repository.togglePromoStatus(promoId)
+            onResult(error)
+        }
+    }
+
+    fun deletePromo(promoId: String, onResult: (String?) -> Unit = {}) {
+        viewModelScope.launch {
+            val error = repository.deletePromo(promoId)
             onResult(error)
         }
     }
