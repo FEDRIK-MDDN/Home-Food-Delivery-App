@@ -29,6 +29,7 @@ import com.example.data.model.Food
 import com.example.ui.theme.CoralPrice
 import com.example.ui.theme.DarkPill
 import com.example.ui.theme.GreenPrimary
+import com.example.util.ImageUtils
 
 @Composable
 fun FoodCard(
@@ -58,7 +59,7 @@ fun FoodCard(
             ) {
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
-                        .data(food.imageUrl)
+                        .data(ImageUtils.resolveImageModel(food.imageUrl))
                         .crossfade(true)
                         .build(),
                     contentDescription = food.title,

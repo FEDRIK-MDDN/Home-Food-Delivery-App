@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.*
 import coil.compose.AsyncImage
 import com.example.data.model.Food
 import com.example.ui.theme.*
+import com.example.util.ImageUtils
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -712,7 +713,7 @@ private fun ClearFoodCard(
                     .clip(RoundedCornerShape(12.dp))
             ) {
                 AsyncImage(
-                    model = food.imageUrl,
+                    model = ImageUtils.resolveImageModel(food.imageUrl),
                     contentDescription = food.title,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop

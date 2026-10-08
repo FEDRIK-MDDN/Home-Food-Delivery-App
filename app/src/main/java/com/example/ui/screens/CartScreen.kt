@@ -29,6 +29,7 @@ import com.example.data.model.CartItem
 import com.example.ui.theme.CoralPrice
 import com.example.ui.theme.DarkPill
 import com.example.ui.theme.GreenPrimary
+import com.example.util.ImageUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -225,7 +226,7 @@ fun CartScreen(
                             ) {
                                 AsyncImage(
                                     model = ImageRequest.Builder(LocalContext.current)
-                                        .data(item.imageUrl)
+                                        .data(ImageUtils.resolveImageModel(item.imageUrl))
                                         .crossfade(true)
                                         .build(),
                                     contentDescription = item.title,

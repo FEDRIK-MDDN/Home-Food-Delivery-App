@@ -35,6 +35,7 @@ import com.example.ui.components.ChefPromoBanner
 import com.example.ui.components.FoodCard
 import com.example.ui.theme.DarkPill
 import com.example.ui.theme.GreenPrimary
+import com.example.util.ImageUtils
 
 data class CategoryItem(val name: String, val icon: String, val isAllIn: Boolean = false)
 
@@ -42,6 +43,7 @@ data class CategoryItem(val name: String, val icon: String, val isAllIn: Boolean
 @Composable
 fun CustomerHomeScreen(
     currentUserName: String = "Friend",
+    currentUserAddress: String = "",
     foods: List<Food>,
     favoriteFoodIds: List<String>,
     searchQuery: String,
@@ -102,10 +104,12 @@ fun CustomerHomeScreen(
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "Manhattan, NY",
+                                text = currentUserAddress.ifBlank { "Add delivery address" },
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
-                                color = Color(0xFF0F172A)
+                                color = Color(0xFF0F172A),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Icon(
@@ -135,15 +139,15 @@ fun CustomerHomeScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Bug 11 fix: Dynamic greeting using real user name and time of day
+                // Dynamic greeting using real user name and time of day
                 val currentHour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
                 val timeGreeting = when {
                     currentHour < 12 -> "Morning"
                     currentHour < 17 -> "Afternoon"
                     else -> "Evening"
                 }
-                // Show only the first name for a personal touch
-                val firstName = currentUserName.split(" ").firstOrNull() ?: currentUserName
+                // Show first name, with fallback to Foodie
+                val firstName = currentUserName.trim().split(" ").firstOrNull()?.ifBlank { "Foodie" } ?: "Foodie"
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "$timeGreeting, ",
@@ -350,79 +354,73 @@ fun CustomerHomeScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Reorder in a Snap! Horizontal List (Matching uploaded UI image 1 middle screen)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Reorder in a Snap!",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = Color(0xFF1A1D1E)
-                )
-                Text(
-                    text = "See all",
-                    fontSize = 13.sp,
-                    color = Color(0xFF737880),
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clickable { }
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
             val reorderFoods = foods.filter { it.isAvailable && (it.isReorder || it.isFeatured) }
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(end = 16.dp)
-            ) {
-                items(reorderFoods) { food ->
-                    Card(
-                        modifier = Modifier
-                            .width(160.dp)
-                            .clickable { onFoodClick(food) },
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = if (food.foodId == "f_001") DarkPill else GreenPrimary)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp)
+            if (reorderFoods.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Featured Homemade Dishes",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = Color(0xFF1A1D1E)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(end = 16.dp)
+                ) {
+                    items(reorderFoods, key = { it.foodId }) { food ->
+                        Card(
+                            modifier = Modifier
+                                .width(160.dp)
+                                .clickable { onFoodClick(food) },
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = GreenPrimary)
                         ) {
-                            Text(
-                                text = food.title,
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = food.description,
-                                color = Color.White.copy(alpha = 0.8f),
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(100.dp)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(Color.White.copy(alpha = 0.2f))
+                            Column(
+                                modifier = Modifier.padding(12.dp)
                             ) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(LocalContext.current)
-                                        .data(food.imageUrl)
-                                        .crossfade(true)
-                                        .build(),
-                                    contentDescription = food.title,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
+                                Text(
+                                    text = food.title,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
+                                Text(
+                                    text = food.description,
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(100.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(Color.White.copy(alpha = 0.2f))
+                                ) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(ImageUtils.resolveImageModel(food.imageUrl))
+                                            .crossfade(true)
+                                            .build(),
+                                        contentDescription = food.title,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
                             }
                         }
                     }

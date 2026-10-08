@@ -4,9 +4,11 @@ import android.content.Context
 import com.example.data.local.*
 import com.example.data.model.*
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
+import com.example.util.GoogleAuthHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -21,18 +23,25 @@ private const val COL_FOODS         = "foods"
 private const val COL_ORDERS        = "orders"
 private const val COL_NOTIFICATIONS = "notifications"
 
-class HomeChefRepository(context: Context) {
+private val DUMMY_FOOD_IDS = setOf("f_sarah_01", "f_001", "f_002", "f_003", "f_004", "f_005")
+private val DUMMY_COOK_IDS = setOf("cook_001", "cook_002")
+
+class HomeChefRepository(private val context: Context) {
 
     private val auth      = FirebaseAuth.getInstance()
     private val firestore = FirebaseFirestore.getInstance()
     private val db        = AppDatabase.getDatabase(context)
-    private val scope     = CoroutineScope(Dispatchers.IO)
+    private val scope     = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+        android.util.Log.w("HomeChef", "Coroutine handled error: ${e.message}")
+    })
 
     // ─── Live Listeners ───────────────────────────────────────────────────────
     private var foodsListener: ListenerRegistration? = null
     private var ordersListener: ListenerRegistration? = null
     private var notifsListener: ListenerRegistration? = null
     private var usersListener: ListenerRegistration? = null
+    private var cartListener: ListenerRegistration? = null
+    private var favoritesListener: ListenerRegistration? = null
 
     // ─── State Flows ──────────────────────────────────────────────────────────
     private val _currentUser = MutableStateFlow<User?>(null)
@@ -50,62 +59,159 @@ class HomeChefRepository(context: Context) {
     private val _notifications = MutableStateFlow<List<NotificationItem>>(emptyList())
     val notifications: StateFlow<List<NotificationItem>> = _notifications.asStateFlow()
 
-    // ─── Room-backed Flows (offline-capable) ──────────────────────────────────
-    val favoriteFoodIds: StateFlow<List<String>> = _currentUser
-        .flatMapLatest { user ->
-            if (user != null) db.favoriteDao().getFavoriteFoodIds(user.userId)
-            else flowOf(emptyList())
-        }
-        .stateIn(scope, SharingStarted.Lazily, emptyList())
+    // ─── Cart & Favorites (Firestore-backed, cloud-synced) ────────────────────
+    private val _favoriteFoodIds = MutableStateFlow<List<String>>(emptyList())
+    val favoriteFoodIds: StateFlow<List<String>> = _favoriteFoodIds.asStateFlow()
 
-    val cartItems: StateFlow<List<CartItem>> = _currentUser
-        .flatMapLatest { user ->
-            if (user != null) {
-                db.cartDao().getAllCartItems(user.userId).map { list ->
-                    list.map {
-                        CartItem(
-                            foodId         = it.foodId,
-                            cookId         = it.cookId,
-                            cookName       = it.cookName,
-                            title          = it.title,
-                            description    = it.description,
-                            price          = it.price,
-                            imageUrl       = it.imageUrl,
-                            quantity       = it.quantity,
-                            specialRequest = it.specialRequest
-                        )
-                    }
-                }
-            } else flowOf(emptyList())
-        }
-        .stateIn(scope, SharingStarted.Lazily, emptyList())
+    private val _cartItems = MutableStateFlow<List<CartItem>>(emptyList())
+    val cartItems: StateFlow<List<CartItem>> = _cartItems.asStateFlow()
 
     init {
-        startGlobalListeners()
+        // Automatically start listeners as soon as user is authenticated
+        auth.addAuthStateListener { firebaseAuth ->
+            val user = firebaseAuth.currentUser
+            if (user != null) {
+                android.util.Log.d("HomeChef", "Auth state changed: user ${user.uid} signed in. Attaching listeners...")
+                startGlobalListeners()
+                fetchFoodsOnce()
+            } else {
+                android.util.Log.d("HomeChef", "Auth state changed: no user signed in.")
+                stopAllUserListeners()
+            }
+        }
+        seedAdminAccountIfNeeded()
+        restoreSessionIfLoggedIn()
+        if (auth.currentUser != null) {
+            startGlobalListeners()
+            fetchFoodsOnce()
+            cleanDummyFoodsFromFirestore()
+        }
+    }
+
+    private fun cleanDummyFoodsFromFirestore() {
+        scope.launch {
+            try {
+                DUMMY_FOOD_IDS.forEach { id ->
+                    firestore.collection(COL_FOODS).document(id).delete().await()
+                }
+                android.util.Log.d("HomeChef", "Dummy foods removed from Firestore.")
+            } catch (e: Exception) {
+                android.util.Log.w("HomeChef", "Clean dummy foods skipped: ${e.message}")
+            }
+        }
+    }
+
+    private fun restoreSessionIfLoggedIn() {
+        val firebaseUser = auth.currentUser ?: return
+        val uid = firebaseUser.uid
+        val email = firebaseUser.email.orEmpty().trim().lowercase()
+        scope.launch {
+            try {
+                val doc = firestore.collection(COL_USERS).document(uid).get().await()
+                val user = if (doc.exists()) doc.toUser() else null
+
+                val resolvedEmail = when {
+                    !user?.email.isNullOrBlank() -> user!!.email
+                    email.isNotBlank() -> email
+                    else -> ""
+                }
+                val resolvedName = when {
+                    !user?.name.isNullOrBlank() -> user!!.name
+                    !firebaseUser.displayName.isNullOrBlank() -> firebaseUser.displayName!!.trim()
+                    resolvedEmail.isNotBlank() -> resolvedEmail.substringBefore("@")
+                        .replace(".", " ")
+                        .replace("_", " ")
+                        .split(" ")
+                        .filter { it.isNotBlank() }
+                        .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+                    else -> "Foodie"
+                }
+                val resolvedPhone = user?.phone?.ifBlank { null } ?: firebaseUser.phoneNumber.orEmpty()
+                val resolvedRole = user?.role ?: UserRole.CUSTOMER
+                val resolvedAddress = user?.address.orEmpty()
+                val resolvedPhoto = user?.photoUrl.orEmpty()
+                val resolvedApproved = user?.isApprovedCook ?: (resolvedRole != UserRole.COOK)
+                val resolvedSuspended = user?.isSuspended ?: false
+
+                val finalUser = User(
+                    userId         = uid,
+                    name           = resolvedName,
+                    email          = resolvedEmail,
+                    phone          = resolvedPhone,
+                    role           = resolvedRole,
+                    photoUrl       = resolvedPhoto,
+                    address        = resolvedAddress,
+                    isApprovedCook = resolvedApproved,
+                    isSuspended    = resolvedSuspended
+                )
+                _currentUser.value = finalUser
+                startAllUserListeners(uid)
+                android.util.Log.d("HomeChef", "Restored session for $resolvedName ($resolvedRole)")
+            } catch (e: Exception) {
+                android.util.Log.w("HomeChef", "Session restore failed: ${e.message}")
+            }
+        }
     }
 
     // ─── Firestore Real-time Listeners ────────────────────────────────────────
-    private fun startGlobalListeners() {
-        // Foods
+    fun startGlobalListeners() {
+        if (auth.currentUser == null) {
+            android.util.Log.d("HomeChef", "Skipping startGlobalListeners: user not authenticated yet.")
+            return
+        }
+        foodsListener?.remove()
+        ordersListener?.remove()
+        usersListener?.remove()
+
+        // Foods — live cook-added dishes only
         foodsListener = firestore.collection(COL_FOODS)
-            .addSnapshotListener { snap, _ ->
+            .addSnapshotListener { snap, error ->
+                if (error != null) {
+                    android.util.Log.e("HomeChef", "Error listening to foods: ${error.message}")
+                    return@addSnapshotListener
+                }
                 if (snap != null) {
                     val list = snap.documents.mapNotNull { it.toFood() }
-                    _foods.value = list.ifEmpty { defaultFoods() }
+                        .filterNot { it.foodId in DUMMY_FOOD_IDS || it.cookId in DUMMY_COOK_IDS }
+                    _foods.value = list
+                    android.util.Log.d("HomeChef", "Loaded ${_foods.value.size} cook-added dishes from Firestore")
                 }
             }
         // Orders
         ordersListener = firestore.collection(COL_ORDERS)
-            .addSnapshotListener { snap, _ ->
+            .addSnapshotListener { snap, error ->
+                if (error != null) {
+                    android.util.Log.w("HomeChef", "Orders listener error: ${error.message}")
+                    return@addSnapshotListener
+                }
                 if (snap != null)
                     _orders.value = snap.documents.mapNotNull { it.toOrder() }
             }
         // Users (admin)
         usersListener = firestore.collection(COL_USERS)
-            .addSnapshotListener { snap, _ ->
+            .addSnapshotListener { snap, error ->
+                if (error != null) {
+                    android.util.Log.w("HomeChef", "Users listener error: ${error.message}")
+                    return@addSnapshotListener
+                }
                 if (snap != null)
                     _users.value = snap.documents.mapNotNull { it.toUser() }
             }
+    }
+
+    fun fetchFoodsOnce() {
+        if (auth.currentUser == null) return
+        scope.launch {
+            try {
+                val snap = firestore.collection(COL_FOODS).get().await()
+                val list = snap.documents.mapNotNull { it.toFood() }
+                    .filterNot { it.foodId in DUMMY_FOOD_IDS || it.cookId in DUMMY_COOK_IDS }
+                _foods.value = list
+                android.util.Log.d("HomeChef", "Directly fetched ${list.size} cook-added dishes from Firestore.")
+            } catch (e: Exception) {
+                android.util.Log.w("HomeChef", "fetchFoodsOnce failed: ${e.message}")
+            }
+        }
     }
 
     private fun startUserNotifListener(userId: String) {
@@ -119,6 +225,88 @@ class HomeChefRepository(context: Context) {
             }
     }
 
+    private fun startUserCartListener(userId: String) {
+        cartListener?.remove()
+        cartListener = firestore.collection(COL_USERS).document(userId)
+            .collection("cart")
+            .addSnapshotListener { snap, _ ->
+                if (snap != null) {
+                    _cartItems.value = snap.documents.mapNotNull { doc ->
+                        try {
+                            CartItem(
+                                foodId         = doc.getString("foodId") ?: doc.id,
+                                cookId         = doc.getString("cookId") ?: "",
+                                cookName       = doc.getString("cookName") ?: "",
+                                title          = doc.getString("title") ?: "",
+                                description    = doc.getString("description") ?: "",
+                                price          = doc.getDouble("price") ?: 0.0,
+                                imageUrl       = doc.getString("imageUrl") ?: "",
+                                quantity       = doc.getLong("quantity")?.toInt() ?: 1,
+                                specialRequest = doc.getString("specialRequest") ?: ""
+                            )
+                        } catch (e: Exception) { null }
+                    }
+                }
+            }
+    }
+
+    private fun startUserFavoritesListener(userId: String) {
+        favoritesListener?.remove()
+        favoritesListener = firestore.collection(COL_USERS).document(userId)
+            .collection("favorites")
+            .addSnapshotListener { snap, _ ->
+                if (snap != null)
+                    _favoriteFoodIds.value = snap.documents.map { it.id }
+            }
+    }
+
+    private fun startAllUserListeners(uid: String) {
+        startGlobalListeners()
+        fetchFoodsOnce()
+        startUserNotifListener(uid)
+        startUserCartListener(uid)
+        startUserFavoritesListener(uid)
+        cleanDummyFoodsFromFirestore()
+    }
+
+    private fun stopAllUserListeners() {
+        notifsListener?.remove()
+        cartListener?.remove()
+        favoritesListener?.remove()
+        _cartItems.value = emptyList()
+        _favoriteFoodIds.value = emptyList()
+        _notifications.value = emptyList()
+    }
+
+    // Seeds admin account into Firebase Auth + Firestore on first launch
+    private fun seedAdminAccountIfNeeded() {
+        scope.launch {
+            try {
+                // Try to create admin in Firebase Auth
+                val result = auth.createUserWithEmailAndPassword(ADMIN_EMAIL, ADMIN_PASSWORD).await()
+                val uid = result.user?.uid ?: return@launch
+                // Write admin document to Firestore
+                firestore.collection(COL_USERS).document(uid).set(mapOf(
+                    "userId"         to uid,
+                    "name"           to "Admin",
+                    "email"          to ADMIN_EMAIL,
+                    "phone"          to "",
+                    "role"           to "ADMIN",
+                    "photoUrl"       to "",
+                    "address"        to "",
+                    "isApprovedCook" to false,
+                    "isSuspended"    to false
+                )).await()
+                // Sign out immediately — this was just seeding, not a real login
+                auth.signOut()
+                android.util.Log.d("HomeChef", "Admin account seeded in Firebase.")
+            } catch (e: Exception) {
+                // "email already in use" = admin already exists, that's fine
+                android.util.Log.d("HomeChef", "Admin seed: ${e.message}")
+            }
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // AUTH
     // ─────────────────────────────────────────────────────────────────────────
@@ -126,12 +314,90 @@ class HomeChefRepository(context: Context) {
     suspend fun login(email: String, password: String): String? = withContext(Dispatchers.IO) {
         return@withContext try {
             val result = auth.signInWithEmailAndPassword(email.trim(), password).await()
-            val uid    = result.user?.uid ?: return@withContext "Login failed."
-            // Load user from Firestore and set immediately
-            val doc = firestore.collection(COL_USERS).document(uid).get().await()
-            val user = doc.toUser() ?: return@withContext "Account data not found. Please re-register."
-            _currentUser.value = user
-            startUserNotifListener(uid)
+            val firebaseUser = result.user ?: return@withContext "Login failed."
+            val uid = firebaseUser.uid
+            val trimmedEmail = email.trim().lowercase()
+
+            // 1. Try reading from Firestore
+            var user: User? = null
+            try {
+                val doc = firestore.collection(COL_USERS).document(uid).get().await()
+                if (doc.exists()) {
+                    user = doc.toUser()
+                }
+            } catch (fsEx: Exception) {
+                android.util.Log.w("HomeChef", "Firestore read during login failed: ${fsEx.message}")
+            }
+
+            // 2. Resolve fields with robust fallbacks
+            val resolvedEmail = when {
+                !user?.email.isNullOrBlank() -> user!!.email
+                !firebaseUser.email.isNullOrBlank() -> firebaseUser.email!!.trim().lowercase()
+                else -> trimmedEmail
+            }
+
+            val resolvedName = when {
+                !user?.name.isNullOrBlank() -> user!!.name
+                !firebaseUser.displayName.isNullOrBlank() -> firebaseUser.displayName!!.trim()
+                else -> resolvedEmail.substringBefore("@")
+                    .replace(".", " ")
+                    .replace("_", " ")
+                    .split(" ")
+                    .filter { it.isNotBlank() }
+                    .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+                    .ifBlank { "Customer" }
+            }
+
+            val resolvedPhone = when {
+                !user?.phone.isNullOrBlank() -> user!!.phone
+                !firebaseUser.phoneNumber.isNullOrBlank() -> firebaseUser.phoneNumber!!
+                else -> ""
+            }
+
+            val resolvedRole = user?.role ?: UserRole.CUSTOMER
+            val resolvedAddress = user?.address.orEmpty()
+            val resolvedPhoto = user?.photoUrl.orEmpty()
+            val resolvedApproved = user?.isApprovedCook ?: (resolvedRole != UserRole.COOK)
+            val resolvedSuspended = user?.isSuspended ?: false
+
+            val finalUser = User(
+                userId         = uid,
+                name           = resolvedName,
+                email          = resolvedEmail,
+                phone          = resolvedPhone,
+                role           = resolvedRole,
+                photoUrl       = resolvedPhoto,
+                address        = resolvedAddress,
+                isApprovedCook = resolvedApproved,
+                isSuspended    = resolvedSuspended
+            )
+
+            _currentUser.value = finalUser
+
+            // 3. Auto-heal profile in Firestore so customer details are saved permanently
+            scope.launch {
+                try {
+                    firestore.collection(COL_USERS).document(uid).set(
+                        mapOf(
+                            "userId"         to uid,
+                            "name"           to resolvedName,
+                            "email"          to resolvedEmail,
+                            "phone"          to resolvedPhone,
+                            "role"           to resolvedRole.name,
+                            "photoUrl"       to resolvedPhoto,
+                            "address"        to resolvedAddress,
+                            "isApprovedCook" to resolvedApproved,
+                            "isSuspended"    to resolvedSuspended
+                        ),
+                        SetOptions.merge()
+                    ).await()
+                    android.util.Log.d("HomeChef", "Customer profile synced in Firestore: $resolvedName ($uid)")
+                } catch (e: Exception) {
+                    android.util.Log.w("HomeChef", "Failed to auto-heal profile in Firestore: ${e.message}")
+                }
+            }
+
+            startAllUserListeners(uid)
             null
         } catch (e: Exception) {
             parseAuthError(e.message)
@@ -153,7 +419,15 @@ class HomeChefRepository(context: Context) {
             val uid    = result.user?.uid ?: return@withContext "Registration failed."
             val trimmedEmail = email.trim().lowercase()
 
-            // Step 2: Set currentUser IMMEDIATELY so navigation fires right away
+            // Update Auth displayName
+            try {
+                val profileUpdates = com.google.firebase.auth.userProfileChangeRequest {
+                    displayName = name.trim()
+                }
+                result.user?.updateProfile(profileUpdates)?.await()
+            } catch (_: Exception) {}
+
+            // Step 2: Set currentUser IMMEDIATELY
             val newUser = User(
                 userId         = uid,
                 name           = name.trim(),
@@ -166,24 +440,33 @@ class HomeChefRepository(context: Context) {
                 isSuspended    = false
             )
             _currentUser.value = newUser
-            startUserNotifListener(uid)
+            startAllUserListeners(uid)
 
-            // Step 3: Firestore write in background — non-fatal if it fails
-            try {
-                val userDoc = mapOf(
-                    "userId"         to uid,
-                    "name"           to name.trim(),
-                    "email"          to trimmedEmail,
-                    "phone"          to phone.trim(),
-                    "role"           to role.name,
-                    "photoUrl"       to "",
-                    "address"        to "",
-                    "isApprovedCook" to (role != UserRole.COOK),
-                    "isSuspended"    to false
-                )
-                firestore.collection(COL_USERS).document(uid).set(userDoc).await()
-            } catch (fsEx: Exception) {
-                android.util.Log.w("HomeChef", "Firestore write failed (non-fatal): ${fsEx.message}")
+            // Step 3: Firestore write with retries
+            scope.launch {
+                var attempts = 0
+                while (attempts < 3) {
+                    try {
+                        val userDoc = mapOf(
+                            "userId"         to uid,
+                            "name"           to name.trim(),
+                            "email"          to trimmedEmail,
+                            "phone"          to phone.trim(),
+                            "role"           to role.name,
+                            "photoUrl"       to "",
+                            "address"        to "",
+                            "isApprovedCook" to (role != UserRole.COOK),
+                            "isSuspended"    to false
+                        )
+                        firestore.collection(COL_USERS).document(uid).set(userDoc).await()
+                        android.util.Log.d("HomeChef", "User profile written to Firestore.")
+                        break
+                    } catch (e: Exception) {
+                        attempts++
+                        android.util.Log.w("HomeChef", "Registration Firestore write attempt $attempts failed: ${e.message}")
+                        if (attempts < 3) kotlinx.coroutines.delay(500)
+                    }
+                }
             }
 
             null // success
@@ -193,10 +476,99 @@ class HomeChefRepository(context: Context) {
     }
 
 
+    suspend fun signInWithGoogle(idToken: String, selectedRole: UserRole = UserRole.CUSTOMER): String? = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val credential = GoogleAuthProvider.getCredential(idToken, null)
+            val authResult = auth.signInWithCredential(credential).await()
+            val firebaseUser = authResult.user ?: return@withContext "Google Sign-In failed: No user returned."
+            val uid = firebaseUser.uid
+            val email = firebaseUser.email.orEmpty().trim().lowercase()
+            val displayName = firebaseUser.displayName.orEmpty().trim().ifBlank {
+                email.substringBefore("@")
+                    .replace(".", " ")
+                    .replace("_", " ")
+                    .split(" ")
+                    .filter { it.isNotBlank() }
+                    .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+                    .ifBlank { "User" }
+            }
+            val photoUrl = firebaseUser.photoUrl?.toString().orEmpty()
+            val phone = firebaseUser.phoneNumber.orEmpty()
+
+            // Check if user already exists in Firestore
+            var existingUser: User? = null
+            try {
+                val doc = firestore.collection(COL_USERS).document(uid).get().await()
+                if (doc.exists()) {
+                    existingUser = doc.toUser()
+                }
+            } catch (fsEx: Exception) {
+                android.util.Log.w("HomeChef", "Firestore check for Google user failed: ${fsEx.message}")
+            }
+
+            val finalUser = if (existingUser != null) {
+                // Existing user — retain their existing role and details, update photo if available
+                existingUser.copy(
+                    photoUrl = existingUser.photoUrl.ifBlank { photoUrl },
+                    email = existingUser.email.ifBlank { email }
+                )
+            } else {
+                // First-time Google user — initialize with chosen role
+                User(
+                    userId         = uid,
+                    name           = displayName,
+                    email          = email,
+                    phone          = phone,
+                    role           = selectedRole,
+                    photoUrl       = photoUrl,
+                    address        = "",
+                    isApprovedCook = (selectedRole != UserRole.COOK),
+                    isSuspended    = false
+                )
+            }
+
+            _currentUser.value = finalUser
+
+            // Sync profile into Firestore
+            scope.launch {
+                try {
+                    val userDoc = mapOf(
+                        "userId"         to finalUser.userId,
+                        "name"           to finalUser.name,
+                        "email"          to finalUser.email,
+                        "phone"          to finalUser.phone,
+                        "role"           to finalUser.role.name,
+                        "photoUrl"       to finalUser.photoUrl,
+                        "address"        to finalUser.address,
+                        "isApprovedCook" to finalUser.isApprovedCook,
+                        "isSuspended"    to finalUser.isSuspended
+                    )
+                    firestore.collection(COL_USERS).document(uid).set(userDoc, SetOptions.merge()).await()
+                    android.util.Log.d("HomeChef", "Google user synced to Firestore: ${finalUser.name} ($uid)")
+                } catch (e: Exception) {
+                    android.util.Log.w("HomeChef", "Failed to save Google user in Firestore: ${e.message}")
+                }
+            }
+
+            startAllUserListeners(uid)
+            null // success
+        } catch (e: Exception) {
+            android.util.Log.e("HomeChef", "signInWithGoogle error: ${e.message}", e)
+            parseAuthError(e.message)
+        }
+    }
+
     fun logout() {
         auth.signOut()
+        scope.launch {
+            GoogleAuthHelper.clearCredentialState(context)
+        }
         _currentUser.value = null
-        notifsListener?.remove()
+        stopAllUserListeners()
+        foodsListener?.remove()
+        ordersListener?.remove()
+        usersListener?.remove()
+        _foods.value = emptyList()
     }
 
     private suspend fun loadUserFromFirestore(uid: String) {
@@ -215,6 +587,10 @@ class HomeChefRepository(context: Context) {
             msg.contains("email address is already") -> "An account with this email already exists."
             msg.contains("weak-password")          -> "Password must be at least 6 characters."
             msg.contains("network error")          -> "Network error. Check your internet connection."
+            msg.contains("account-exists-with-different-credential", ignoreCase = true) ->
+                "An account already exists with this email using a different sign-in method."
+            msg.contains("invalid-credential", ignoreCase = true) ->
+                "Invalid credentials. Please verify your Google account and try again."
             else                                   -> "Error: $msg"
         }
     }
@@ -227,9 +603,20 @@ class HomeChefRepository(context: Context) {
         val current = _currentUser.value ?: return
         _currentUser.value = current.copy(name = name, email = email, phone = phone, address = address)
         scope.launch {
-            firestore.collection(COL_USERS).document(current.userId).update(
-                mapOf("name" to name, "phone" to phone, "address" to address)
-            ).await()
+            try {
+                firestore.collection(COL_USERS).document(current.userId).set(
+                    mapOf(
+                        "name" to name,
+                        "email" to email,
+                        "phone" to phone,
+                        "address" to address
+                    ),
+                    SetOptions.merge()
+                ).await()
+                android.util.Log.d("HomeChef", "User profile updated in Firestore.")
+            } catch (e: Exception) {
+                android.util.Log.e("HomeChef", "Failed to update user profile: ${e.message}")
+            }
         }
     }
 
@@ -237,79 +624,96 @@ class HomeChefRepository(context: Context) {
         val current = _currentUser.value ?: return
         _currentUser.value = current.copy(photoUrl = photoUri)
         scope.launch {
-            firestore.collection(COL_USERS).document(current.userId)
-                .update("photoUrl", photoUri).await()
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // FAVORITES (Room — offline)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    fun toggleFavorite(foodId: String) {
-        val userId = _currentUser.value?.userId ?: return
-        scope.launch {
-            if (favoriteFoodIds.value.contains(foodId)) {
-                db.favoriteDao().removeFavorite(userId, foodId)
-            } else {
-                db.favoriteDao().addFavorite(FavoriteEntity(userId, foodId))
+            try {
+                firestore.collection(COL_USERS).document(current.userId).set(
+                    mapOf("photoUrl" to photoUri),
+                    SetOptions.merge()
+                ).await()
+                android.util.Log.d("HomeChef", "User photo updated in Firestore.")
+            } catch (e: Exception) {
+                android.util.Log.e("HomeChef", "Failed to update user photo: ${e.message}")
             }
         }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // CART (Room — offline)
+    // FAVORITES (Firestore — cloud-synced)
     // ─────────────────────────────────────────────────────────────────────────
+
+    fun toggleFavorite(foodId: String) {
+        val userId = _currentUser.value?.userId ?: return
+        val ref = firestore.collection(COL_USERS).document(userId)
+            .collection("favorites").document(foodId)
+        scope.launch {
+            try {
+                if (favoriteFoodIds.value.contains(foodId)) ref.delete().await()
+                else ref.set(mapOf("foodId" to foodId, "addedAt" to System.currentTimeMillis())).await()
+            } catch (e: Exception) {
+                android.util.Log.w("HomeChef", "Favorite toggle failed: ${e.message}")
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CART (Firestore — cloud-synced)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private fun cartRef(userId: String) =
+        firestore.collection(COL_USERS).document(userId).collection("cart")
 
     fun addToCart(food: Food, quantity: Int = 1, specialRequest: String = "") {
         val userId = _currentUser.value?.userId ?: return
         scope.launch {
-            val existing = cartItems.value.find { it.foodId == food.foodId }
-            val newQty   = (existing?.quantity ?: 0) + quantity
-            db.cartDao().insertOrUpdate(
-                CartItemEntity(
-                    userId         = userId,
-                    foodId         = food.foodId,
-                    cookId         = food.cookId,
-                    cookName       = food.cookName,
-                    title          = food.title,
-                    description    = food.description,
-                    price          = food.discountPrice ?: food.price,
-                    imageUrl       = food.imageUrl,
-                    quantity       = newQty,
-                    specialRequest = if (specialRequest.isNotBlank()) specialRequest
-                                     else (existing?.specialRequest ?: "")
-                )
-            )
+            try {
+                val existing = cartItems.value.find { it.foodId == food.foodId }
+                val newQty   = (existing?.quantity ?: 0) + quantity
+                cartRef(userId).document(food.foodId).set(mapOf(
+                    "foodId"         to food.foodId,
+                    "cookId"         to food.cookId,
+                    "cookName"       to food.cookName,
+                    "title"          to food.title,
+                    "description"    to food.description,
+                    "price"          to (food.discountPrice ?: food.price),
+                    "imageUrl"       to food.imageUrl,
+                    "quantity"       to newQty,
+                    "specialRequest" to if (specialRequest.isNotBlank()) specialRequest
+                                        else (existing?.specialRequest ?: "")
+                )).await()
+            } catch (e: Exception) {
+                android.util.Log.w("HomeChef", "Add to cart failed: ${e.message}")
+            }
         }
     }
 
     fun updateCartQuantity(foodId: String, newQty: Int) {
         val userId = _currentUser.value?.userId ?: return
         scope.launch {
-            if (newQty <= 0) {
-                db.cartDao().deleteByFoodId(userId, foodId)
-            } else {
-                val item = cartItems.value.find { it.foodId == foodId }
-                item?.let {
-                    db.cartDao().insertOrUpdate(
-                        CartItemEntity(userId, it.foodId, it.cookId, it.cookName,
-                            it.title, it.description, it.price, it.imageUrl,
-                            newQty, it.specialRequest)
-                    )
-                }
+            try {
+                if (newQty <= 0) cartRef(userId).document(foodId).delete().await()
+                else cartRef(userId).document(foodId).update("quantity", newQty).await()
+            } catch (e: Exception) {
+                android.util.Log.w("HomeChef", "Update cart failed: ${e.message}")
             }
         }
     }
 
     fun removeCartItem(foodId: String) {
         val userId = _currentUser.value?.userId ?: return
-        scope.launch { db.cartDao().deleteByFoodId(userId, foodId) }
+        scope.launch {
+            try { cartRef(userId).document(foodId).delete().await() }
+            catch (e: Exception) { android.util.Log.w("HomeChef", "Remove cart failed: ${e.message}") }
+        }
     }
 
     fun clearCart() {
         val userId = _currentUser.value?.userId ?: return
-        scope.launch { db.cartDao().clearCart(userId) }
+        scope.launch {
+            try {
+                cartRef(userId).get().await().documents.forEach { it.reference.delete() }
+            } catch (e: Exception) {
+                android.util.Log.w("HomeChef", "Clear cart failed: ${e.message}")
+            }
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -432,30 +836,64 @@ class HomeChefRepository(context: Context) {
     // ─────────────────────────────────────────────────────────────────────────
 
     fun addFood(food: Food) {
+        // Optimistic update: immediately show in UI (Cook's My Menu & Customer Menu)
+        _foods.value = (_foods.value + food).distinctBy { it.foodId }
+
         scope.launch {
-            firestore.collection(COL_FOODS).document(food.foodId)
-                .set(food.toMap()).await()
+            try {
+                android.util.Log.d("HomeChef", "Writing food ${food.foodId} to Firestore...")
+                firestore.collection(COL_FOODS).document(food.foodId)
+                    .set(food.toMap()).await()
+                android.util.Log.d("HomeChef", "Food ${food.foodId} successfully saved to Firestore.")
+            } catch (e: Exception) {
+                android.util.Log.e("HomeChef", "Failed to save food ${food.foodId}: ${e.message}", e)
+                // Revert optimistic update on failure
+                _foods.value = _foods.value.filter { it.foodId != food.foodId }
+            }
         }
     }
 
     fun updateFood(food: Food) {
+        // Optimistic update
+        _foods.value = _foods.value.map { if (it.foodId == food.foodId) food else it }
+
         scope.launch {
-            firestore.collection(COL_FOODS).document(food.foodId)
-                .set(food.toMap(), SetOptions.merge()).await()
+            try {
+                firestore.collection(COL_FOODS).document(food.foodId)
+                    .set(food.toMap(), SetOptions.merge()).await()
+                android.util.Log.d("HomeChef", "Food ${food.foodId} updated in Firestore.")
+            } catch (e: Exception) {
+                android.util.Log.e("HomeChef", "Failed to update food: ${e.message}", e)
+            }
         }
     }
 
     fun deleteFood(foodId: String) {
+        // Optimistic update
+        _foods.value = _foods.value.filter { it.foodId != foodId }
+
         scope.launch {
-            firestore.collection(COL_FOODS).document(foodId).delete().await()
+            try {
+                firestore.collection(COL_FOODS).document(foodId).delete().await()
+                android.util.Log.d("HomeChef", "Food $foodId deleted from Firestore.")
+            } catch (e: Exception) {
+                android.util.Log.e("HomeChef", "Failed to delete food: ${e.message}", e)
+            }
         }
     }
 
     fun toggleFoodAvailability(foodId: String) {
         val current = _foods.value.find { it.foodId == foodId } ?: return
+        val newAvailable = !current.isAvailable
+        _foods.value = _foods.value.map { if (it.foodId == foodId) it.copy(isAvailable = newAvailable) else it }
+
         scope.launch {
-            firestore.collection(COL_FOODS).document(foodId)
-                .update("isAvailable", !current.isAvailable).await()
+            try {
+                firestore.collection(COL_FOODS).document(foodId)
+                    .update("isAvailable", newAvailable).await()
+            } catch (e: Exception) {
+                android.util.Log.e("HomeChef", "Failed to toggle availability: ${e.message}", e)
+            }
         }
     }
 
@@ -482,34 +920,35 @@ class HomeChefRepository(context: Context) {
     // SEED default foods if Firestore is empty
     // ─────────────────────────────────────────────────────────────────────────
 
-    fun seedDefaultFoodsIfEmpty() {
-        scope.launch {
-            val existing = firestore.collection(COL_FOODS).limit(1).get().await()
-            if (existing.isEmpty) {
-                defaultFoods().forEach { food ->
-                    firestore.collection(COL_FOODS).document(food.foodId)
-                        .set(food.toMap()).await()
-                }
-            }
-        }
+    fun removeDummyFoods() {
+        cleanDummyFoodsFromFirestore()
     }
 }
 
 // ─── Firestore DocumentSnapshot → Domain Models ───────────────────────────────
 
-private fun com.google.firebase.firestore.DocumentSnapshot.toUser(): User? = try {
-    User(
-        userId         = getString("userId") ?: id,
-        name           = getString("name") ?: "",
-        email          = getString("email") ?: "",
-        phone          = getString("phone") ?: "",
-        role           = UserRole.valueOf(getString("role") ?: "CUSTOMER"),
-        photoUrl       = getString("photoUrl") ?: "",
-        address        = getString("address") ?: "",
-        isApprovedCook = getBoolean("isApprovedCook") ?: false,
-        isSuspended    = getBoolean("isSuspended") ?: false
-    )
-} catch (e: Exception) { null }
+private fun com.google.firebase.firestore.DocumentSnapshot.toUser(): User? {
+    return try {
+        if (!exists()) return null
+        val docName = getString("name")?.trim().orEmpty()
+        val docEmail = getString("email")?.trim().orEmpty()
+        if (docName.isBlank() && docEmail.isBlank()) return null
+        User(
+            userId         = getString("userId") ?: id,
+            name           = docName,
+            email          = docEmail,
+            phone          = getString("phone")?.trim().orEmpty(),
+            role           = try { UserRole.valueOf(getString("role") ?: "CUSTOMER") } catch (_: Exception) { UserRole.CUSTOMER },
+            photoUrl       = getString("photoUrl")?.trim().orEmpty(),
+            address        = getString("address")?.trim().orEmpty(),
+            isApprovedCook = getBoolean("isApprovedCook") ?: false,
+            isSuspended    = getBoolean("isSuspended") ?: false
+        )
+    } catch (e: Exception) {
+        android.util.Log.e("HomeChef", "Error parsing user doc $id: ${e.message}")
+        null
+    }
+}
 
 private fun com.google.firebase.firestore.DocumentSnapshot.toFood(): Food? = try {
     @Suppress("UNCHECKED_CAST")
@@ -520,22 +959,25 @@ private fun com.google.firebase.firestore.DocumentSnapshot.toFood(): Food? = try
         isCookVerified       = getBoolean("isCookVerified") ?: false,
         title                = getString("title") ?: "",
         description          = getString("description") ?: "",
-        price                = getDouble("price") ?: 0.0,
-        discountPrice        = getDouble("discountPrice"),
+        price                = (get("price") as? Number)?.toDouble() ?: getDouble("price") ?: 0.0,
+        discountPrice        = (get("discountPrice") as? Number)?.toDouble() ?: getDouble("discountPrice"),
         category             = getString("category") ?: "",
         imageUrl             = getString("imageUrl") ?: "",
-        ingredients          = get("ingredients") as? List<String> ?: emptyList(),
-        allergens            = get("allergens") as? List<String> ?: emptyList(),
-        calories             = getLong("calories")?.toInt() ?: 0,
-        preparationTimeMins  = getLong("preparationTimeMins")?.toInt() ?: 20,
-        rating               = getDouble("rating") ?: 0.0,
-        reviewCount          = getLong("reviewCount")?.toInt() ?: 0,
-        availableQuantity    = getLong("availableQuantity")?.toInt() ?: 10,
+        ingredients          = (get("ingredients") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList(),
+        allergens            = (get("allergens") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList(),
+        calories             = (get("calories") as? Number)?.toInt() ?: getLong("calories")?.toInt() ?: 0,
+        preparationTimeMins  = (get("preparationTimeMins") as? Number)?.toInt() ?: getLong("preparationTimeMins")?.toInt() ?: 20,
+        rating               = (get("rating") as? Number)?.toDouble() ?: getDouble("rating") ?: 0.0,
+        reviewCount          = (get("reviewCount") as? Number)?.toInt() ?: getLong("reviewCount")?.toInt() ?: 0,
+        availableQuantity    = (get("availableQuantity") as? Number)?.toInt() ?: getLong("availableQuantity")?.toInt() ?: 10,
         isAvailable          = getBoolean("isAvailable") ?: true,
         isFeatured           = getBoolean("isFeatured") ?: false,
         isReorder            = getBoolean("isReorder") ?: false
     )
-} catch (e: Exception) { null }
+} catch (e: Exception) {
+    android.util.Log.e("HomeChef", "Failed to deserialize food doc $id: ${e.message}")
+    null
+}
 
 private fun com.google.firebase.firestore.DocumentSnapshot.toOrder(): Order? = try {
     @Suppress("UNCHECKED_CAST")
@@ -590,28 +1032,28 @@ private fun com.google.firebase.firestore.DocumentSnapshot.toNotification(): Not
 
 // ─── Domain model → Firestore Map ─────────────────────────────────────────────
 
-private fun Food.toMap() = mapOf(
-    "foodId"              to foodId,
-    "cookId"              to cookId,
-    "cookName"            to cookName,
-    "isCookVerified"      to isCookVerified,
-    "title"               to title,
-    "description"         to description,
-    "price"               to price,
-    "discountPrice"       to discountPrice,
-    "category"            to category,
-    "imageUrl"            to imageUrl,
-    "ingredients"         to ingredients,
-    "allergens"           to allergens,
-    "calories"            to calories,
-    "preparationTimeMins" to preparationTimeMins,
-    "rating"              to rating,
-    "reviewCount"         to reviewCount,
-    "availableQuantity"   to availableQuantity,
-    "isAvailable"         to isAvailable,
-    "isFeatured"          to isFeatured,
-    "isReorder"           to isReorder
-)
+private fun Food.toMap(): Map<String, Any> = buildMap {
+    put("foodId", foodId)
+    put("cookId", cookId)
+    put("cookName", cookName)
+    put("isCookVerified", isCookVerified)
+    put("title", title)
+    put("description", description)
+    put("price", price)
+    discountPrice?.let { put("discountPrice", it) }
+    put("category", category)
+    put("imageUrl", imageUrl)
+    put("ingredients", ingredients)
+    put("allergens", allergens)
+    put("calories", calories)
+    put("preparationTimeMins", preparationTimeMins)
+    put("rating", rating)
+    put("reviewCount", reviewCount)
+    put("availableQuantity", availableQuantity)
+    put("isAvailable", isAvailable)
+    put("isFeatured", isFeatured)
+    put("isReorder", isReorder)
+}
 
 private fun Order.toMap() = mapOf(
     "orderId"             to orderId,

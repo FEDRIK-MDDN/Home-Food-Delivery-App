@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">HomeChef Connect</string>
+    <!-- Web Client ID from Firebase Console (Authentication -> Sign-in method -> Google) -->
+    <string name="default_web_client_id">312120666070-kklsms0rvbli43p0idj2ghni8auum043.apps.googleusercontent.com</string>
 </resources>

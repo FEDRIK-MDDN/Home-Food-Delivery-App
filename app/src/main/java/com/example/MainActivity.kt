@@ -9,11 +9,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import com.example.data.model.UserRole
 import com.example.ui.components.HomeChefBottomNavBar
 import com.example.ui.screens.*
 import com.example.ui.theme.HomeChefConnectTheme
 import com.example.ui.viewmodel.HomeChefViewModel
+import com.example.util.GoogleAuthHelper
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val viewModel: HomeChefViewModel by viewModels()
@@ -95,18 +99,60 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
                     onStartClick = { viewModel.navigateTo("auth") }
                 )
 
-                "auth" -> AuthScreen(
-                    onLogin    = { email, password -> viewModel.login(email, password) },
-                    onRegister = { name, email, phone, password, role ->
-                        viewModel.register(name, email, phone, password, role)
-                    },
-                    authError  = authError,
-                    onClearError = { viewModel.clearAuthError() }
-                )
+                "auth" -> {
+                    val context = LocalContext.current
+                    val activity = context as? androidx.activity.ComponentActivity
+                    val coroutineScope = rememberCoroutineScope()
+                    val webClientId = stringResource(R.string.default_web_client_id)
+                    var currentRole by remember { mutableStateOf(UserRole.CUSTOMER) }
+
+                    val googleSignInLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                        contract = androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+                    ) { actResult ->
+                        val res = GoogleAuthHelper.extractIdTokenFromIntent(actResult.data)
+                        res.onSuccess { idToken ->
+                            viewModel.signInWithGoogle(idToken, currentRole)
+                        }.onFailure { ex ->
+                            if (ex !is kotlinx.coroutines.CancellationException) {
+                                viewModel.setAuthError(ex.localizedMessage ?: "Google Sign-In failed.")
+                            }
+                        }
+                    }
+
+                    AuthScreen(
+                        onLogin    = { email, password -> viewModel.login(email, password) },
+                        onRegister = { name, email, phone, password, role ->
+                            viewModel.register(name, email, phone, password, role)
+                        },
+                        onGoogleSignIn = { role ->
+                            currentRole = role
+                            if (activity != null) {
+                                coroutineScope.launch {
+                                    val result = GoogleAuthHelper.launchGoogleSignIn(activity, webClientId)
+                                    result.onSuccess { idToken ->
+                                        viewModel.signInWithGoogle(idToken, role)
+                                    }.onFailure { ex ->
+                                        if (ex is androidx.credentials.exceptions.NoCredentialException) {
+                                            // Fallback to standard GoogleSignIn activity intent
+                                            googleSignInLauncher.launch(
+                                                GoogleAuthHelper.getGoogleSignInIntent(context, webClientId)
+                                            )
+                                        } else if (ex !is kotlinx.coroutines.CancellationException) {
+                                            viewModel.setAuthError(ex.localizedMessage ?: "Google Sign-In failed.")
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        authError  = authError,
+                        onClearError = { viewModel.clearAuthError() }
+                    )
+                }
 
                 "customer_home" -> currentUser?.let { user ->
                     CustomerHomeScreen(
                         currentUserName  = user.name,
+                        currentUserAddress = user.address,
                         foods            = foods,
                         favoriteFoodIds  = favoriteFoodIds,
                         searchQuery      = searchQuery,

@@ -28,6 +28,7 @@ import com.example.data.model.Food
 import com.example.ui.theme.CoralPrice
 import com.example.ui.theme.DarkPill
 import com.example.ui.theme.GreenPrimary
+import com.example.util.ImageUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -199,7 +200,7 @@ fun FoodDetailsScreen(
                 Box(modifier = Modifier.fillMaxSize()) {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
-                            .data(food.imageUrl)
+                            .data(ImageUtils.resolveImageModel(food.imageUrl))
                             .crossfade(true)
                             .build(),
                         contentDescription = food.title,

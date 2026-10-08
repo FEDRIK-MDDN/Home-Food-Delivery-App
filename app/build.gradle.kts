@@ -105,6 +105,11 @@ dependencies {
   implementation(libs.firebase.firestore)
   // Firebase Auth — cloud authentication
   implementation(libs.firebase.auth)
+  // Google Sign-In & Credential Manager
+  implementation(libs.androidx.credentials)
+  implementation(libs.androidx.credentials.play.services)
+  implementation(libs.googleid)
+  implementation(libs.play.services.auth)
   implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)

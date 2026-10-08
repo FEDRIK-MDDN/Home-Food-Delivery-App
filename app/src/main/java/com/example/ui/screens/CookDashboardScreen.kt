@@ -37,6 +37,10 @@ import com.example.data.model.OrderStatus
 import com.example.data.model.User
 import com.example.ui.theme.GreenContainer
 import com.example.ui.theme.GreenPrimary
+import com.example.util.ImageUtils
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -265,6 +269,48 @@ fun CookDashboardScreen(
                         }
                     }
                 }
+            } else if (cookFoods.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.RestaurantMenu,
+                            contentDescription = null,
+                            tint = Color(0xFFCBD5E1),
+                            modifier = Modifier.size(64.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "No dishes in your menu yet",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = Color(0xFF64748B)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Add your signature homemade dishes so customers can order!",
+                            fontSize = 14.sp,
+                            color = Color(0xFF94A3B8),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        if (currentUser.isApprovedCook) {
+                            Spacer(modifier = Modifier.height(20.dp))
+                            Button(
+                                onClick = { showAddDishDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Add Your First Dish", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
             } else {
                 LazyColumn(
                     modifier = Modifier
@@ -292,6 +338,7 @@ fun CookDashboardScreen(
             onDismiss = { showAddDishDialog = false },
             onAddFood = { food ->
                 onAddFood(food)
+                selectedTab = "My Menu"
                 showAddDishDialog = false
             }
         )
@@ -500,7 +547,7 @@ fun CookFoodItemCard(
 
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
-                        .data(displayImageUrl)
+                        .data(ImageUtils.resolveImageModel(displayImageUrl))
                         .crossfade(true)
                         .build(),
                     contentDescription = food.title,
@@ -773,12 +820,23 @@ fun EditDishDialog(
     var selectedImageUri by remember { mutableStateOf<String?>(null) }
     var customImageUrl by remember { mutableStateOf(if (food.imageUrl.startsWith("http")) food.imageUrl else "") }
     var isAvailable by remember { mutableStateOf(food.isAvailable) }
+    var isImageConverting by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
-            selectedImageUri = it.toString()
+            coroutineScope.launch {
+                isImageConverting = true
+                val base64 = withContext(Dispatchers.IO) {
+                    ImageUtils.uriToBase64(context, it)
+                }
+                selectedImageUri = base64 ?: it.toString()
+                isImageConverting = false
+            }
         }
     }
 
@@ -814,9 +872,26 @@ fun EditDishDialog(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (activeImage != null) {
+                        if (isImageConverting) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = GreenPrimary,
+                                    modifier = Modifier.size(32.dp),
+                                    strokeWidth = 3.dp
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Saving photo...",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF64748B)
+                                )
+                            }
+                        } else if (activeImage != null) {
                             AsyncImage(
-                                model = activeImage,
+                                model = ImageUtils.resolveImageModel(activeImage),
                                 contentDescription = "Dish Photo Preview",
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop
@@ -962,9 +1037,10 @@ fun EditDishDialog(
                         onUpdateFood(updated)
                     }
                 },
+                enabled = !isImageConverting,
                 colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary)
             ) {
-                Text("Update Dish")
+                Text(if (isImageConverting) "Processing..." else "Update Dish")
             }
         },
         dismissButton = {
@@ -982,18 +1058,30 @@ fun AddDishDialog(
     onAddFood: (Food) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
+    var titleError by remember { mutableStateOf(false) }
     var description by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("8.50") }
     var category by remember { mutableStateOf("Biryani") }
     var prepTime by remember { mutableStateOf("25") }
     var selectedImageUri by remember { mutableStateOf<String?>(null) }
     var customImageUrl by remember { mutableStateOf("") }
+    var isImageConverting by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
-            selectedImageUri = it.toString()
+            coroutineScope.launch {
+                isImageConverting = true
+                val base64 = withContext(Dispatchers.IO) {
+                    ImageUtils.uriToBase64(context, it)
+                }
+                selectedImageUri = base64 ?: it.toString()
+                isImageConverting = false
+            }
         }
     }
 
@@ -1028,9 +1116,26 @@ fun AddDishDialog(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (activeImage != null) {
+                        if (isImageConverting) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = GreenPrimary,
+                                    modifier = Modifier.size(32.dp),
+                                    strokeWidth = 3.dp
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Saving photo...",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF64748B)
+                                )
+                            }
+                        } else if (activeImage != null) {
                             AsyncImage(
-                                model = activeImage,
+                                model = ImageUtils.resolveImageModel(activeImage),
                                 contentDescription = "Dish Photo Preview",
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop
@@ -1096,8 +1201,15 @@ fun AddDishDialog(
 
                 OutlinedTextField(
                     value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Dish Title") },
+                    onValueChange = {
+                        title = it
+                        if (it.isNotBlank()) titleError = false
+                    },
+                    label = { Text("Dish Title *") },
+                    isError = titleError,
+                    supportingText = if (titleError) {
+                        { Text("Dish title is required", color = Color.Red) }
+                    } else null,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1133,7 +1245,9 @@ fun AddDishDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (title.isNotBlank()) {
+                    if (title.isBlank()) {
+                        titleError = true
+                    } else {
                         val finalImage = selectedImageUri
                             ?: customImageUrl.ifBlank { null }
                             ?: if (category.contains("biryani", ignoreCase = true) || title.contains("biryani", ignoreCase = true)) {
@@ -1149,10 +1263,10 @@ fun AddDishDialog(
                             // Bug 2 fix: isCookVerified reflects actual approval status,
                             // not hardcoded true. Unapproved cooks get isCookVerified=false.
                             isCookVerified = isApprovedCook,
-                            title = title,
-                            description = description,
+                            title = title.trim(),
+                            description = description.trim(),
                             price = price.toDoubleOrNull() ?: 8.50,
-                            category = category,
+                            category = category.trim().ifBlank { "Homemade" },
                             imageUrl = finalImage,
                             preparationTimeMins = prepTime.toIntOrNull() ?: 20,
                             isFeatured = true,
@@ -1161,9 +1275,10 @@ fun AddDishDialog(
                         onAddFood(newFood)
                     }
                 },
+                enabled = !isImageConverting,
                 colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary)
             ) {
-                Text("Add Dish")
+                Text(if (isImageConverting) "Processing..." else "Add Dish")
             }
         },
         dismissButton = {

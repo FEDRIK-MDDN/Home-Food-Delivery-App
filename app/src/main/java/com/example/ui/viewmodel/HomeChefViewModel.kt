@@ -13,8 +13,8 @@ class HomeChefViewModel(application: Application) : AndroidViewModel(application
     val repository = HomeChefRepository(application)
 
     init {
-        // Seed default foods to Firestore if it's a fresh project
-        repository.seedDefaultFoodsIfEmpty()
+        // Clean any leftover dummy foods so only cook dishes are displayed
+        repository.removeDummyFoods()
     }
 
     // User state — null = not logged in
@@ -97,6 +97,19 @@ class HomeChefViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun signInWithGoogle(idToken: String, selectedRole: UserRole = UserRole.CUSTOMER) {
+        viewModelScope.launch {
+            val error = repository.signInWithGoogle(idToken, selectedRole)
+            if (error != null) {
+                _authError.value = error
+            } else {
+                _authError.value = null
+                val actualRole = repository.currentUser.value?.role ?: selectedRole
+                navigateAfterLogin(actualRole)
+            }
+        }
+    }
+
     fun logout() {
         repository.logout()
         _currentScreen.value = "auth"
@@ -104,6 +117,10 @@ class HomeChefViewModel(application: Application) : AndroidViewModel(application
 
     fun clearAuthError() {
         _authError.value = null
+    }
+
+    fun setAuthError(message: String) {
+        _authError.value = message
     }
 
     private fun navigateAfterLogin(role: UserRole) {
@@ -202,6 +219,7 @@ class HomeChefViewModel(application: Application) : AndroidViewModel(application
     fun updateFood(food: Food)                        { repository.updateFood(food) }
     fun toggleFoodAvailability(foodId: String)        { repository.toggleFoodAvailability(foodId) }
     fun deleteFood(foodId: String)                    { repository.deleteFood(foodId) }
+    fun refreshFoods()                                { repository.startGlobalListeners(); repository.fetchFoodsOnce() }
 
     // ─── Admin ────────────────────────────────────────────────────────────────
 

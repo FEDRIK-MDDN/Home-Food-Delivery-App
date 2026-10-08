@@ -34,6 +34,7 @@ import com.example.ui.theme.GreenPrimary
 fun AuthScreen(
     onLogin: (email: String, password: String) -> Unit,
     onRegister: (name: String, email: String, phone: String, password: String, role: UserRole) -> Unit,
+    onGoogleSignIn: (role: UserRole) -> Unit = {},
     authError: String? = null,
     onClearError: () -> Unit = {}
 ) {
@@ -365,6 +366,78 @@ fun AuthScreen(
                             color = Color.White
                         )
                     }
+
+                    // ── Or Continue With Divider ──────────────────────────────
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        HorizontalDivider(
+                            modifier = Modifier.weight(1f),
+                            color = Color(0xFFE2E8F0)
+                        )
+                        Text(
+                            text = if (isRegisterMode) "OR SIGN UP WITH" else "OR CONTINUE WITH",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp,
+                            color = Color(0xFF94A3B8),
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+                        HorizontalDivider(
+                            modifier = Modifier.weight(1f),
+                            color = Color(0xFFE2E8F0)
+                        )
+                    }
+
+                    // ── Google Sign-In Button (matches screenshot exactly) ───
+                    OutlinedButton(
+                        onClick = { onGoogleSignIn(selectedRole) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            GoogleLogoIcon(modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = if (isRegisterMode) "Sign up with Google" else "Continue with Google",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF1E293B)
+                            )
+                        }
+                    }
+
+                    // Subtitle with shield icon
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = Color(0xFF64748B),
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Instant setup • No password required",
+                            fontSize = 12.sp,
+                            color = Color(0xFF64748B)
+                        )
+                    }
                 }
             }
 
@@ -393,5 +466,57 @@ fun AuthScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+fun GoogleLogoIcon(modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val width = size.width
+        val height = size.height
+        val center = androidx.compose.ui.geometry.Offset(width / 2f, height / 2f)
+        val strokeWidth = width * 0.22f
+
+        // Draw Google 'G' arcs
+        // Red arc (top)
+        drawArc(
+            color = Color(0xFFEA4335),
+            startAngle = 180f,
+            sweepAngle = 135f,
+            useCenter = false,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        )
+        // Yellow arc (bottom-left)
+        drawArc(
+            color = Color(0xFFFBBC05),
+            startAngle = 120f,
+            sweepAngle = 65f,
+            useCenter = false,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidth)
+        )
+        // Green arc (bottom)
+        drawArc(
+            color = Color(0xFF34A853),
+            startAngle = 35f,
+            sweepAngle = 90f,
+            useCenter = false,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        )
+        // Blue arc (right & middle bar)
+        drawArc(
+            color = Color(0xFF4285F4),
+            startAngle = 315f,
+            sweepAngle = 85f,
+            useCenter = false,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidth)
+        )
+        // Blue horizontal crossbar
+        drawLine(
+            color = Color(0xFF4285F4),
+            start = center,
+            end = androidx.compose.ui.geometry.Offset(width * 0.95f, height / 2f),
+            strokeWidth = strokeWidth,
+            cap = androidx.compose.ui.graphics.StrokeCap.Round
+        )
     }
 }
