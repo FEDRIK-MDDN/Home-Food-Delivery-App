@@ -46,10 +46,14 @@ fun ProfileScreen(
     user: User,
     favoriteCount: Int = 0,
     orderCount: Int = 0,
+    cookCount: Int = 0,
+    customerCount: Int = 0,
+    deliveryCount: Int = 0,
     onUpdateProfile: (name: String, email: String, phone: String, address: String) -> Unit,
     onUpdatePhoto: (photoUri: String) -> Unit = {},
     onNavigateToFavorites: () -> Unit,
     onNavigateToOrders: () -> Unit,
+    onNavigateToPortal: () -> Unit = {},
     onLogout: () -> Unit
 ) {
     val context   = LocalContext.current
@@ -82,6 +86,7 @@ fun ProfileScreen(
         }
     }
     var showEditDialog by remember { mutableStateOf(false) }
+    var showSetAddressDialog by remember { mutableStateOf(false) }
     var showDietaryDialog by remember { mutableStateOf(false) }
     var showHelpDialog by remember { mutableStateOf(false) }
     var showLogoutConfirm by remember { mutableStateOf(false) }
@@ -294,99 +299,245 @@ fun ProfileScreen(
             }
 
             // ─── Quick Stats Cards ───────────────────────────────────────────
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Orders Stat Card
-                Card(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { onNavigateToOrders() },
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            if (user.role == UserRole.ADMIN) {
+                // ─── Admin Platform Metrics (Cooks, Customers, Delivery) ─────────
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Column(
+                    // Cooks Stat Card
+                    Card(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                            .weight(1f)
+                            .clickable { onNavigateToPortal() },
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                     ) {
-                        Box(
+                        Column(
                             modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFFECFDF5)),
-                            contentAlignment = Alignment.Center
+                                .fillMaxWidth()
+                                .padding(vertical = 16.dp, horizontal = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.ShoppingBag,
-                                contentDescription = "Orders",
-                                tint = Color(0xFF047857),
-                                modifier = Modifier.size(22.dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFFECFDF5)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Restaurant,
+                                    contentDescription = "Cooks",
+                                    tint = Color(0xFF047857),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "$cookCount",
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = "Cooks",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF64748B)
                             )
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "$orderCount",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF0F172A)
-                        )
-                        Text(
-                            text = "My Orders",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF64748B)
-                        )
+                    }
+
+                    // Customers Stat Card
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onNavigateToPortal() },
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 16.dp, horizontal = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFFEFF6FF)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = "Customers",
+                                    tint = Color(0xFF2563EB),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "$customerCount",
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = "Customers",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+                    }
+
+                    // Delivery Partners Stat Card
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onNavigateToPortal() },
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 16.dp, horizontal = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFFFEF3C7)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.TwoWheeler,
+                                    contentDescription = "Delivery",
+                                    tint = Color(0xFFD97706),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "$deliveryCount",
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = "Delivery",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF64748B)
+                            )
+                        }
                     }
                 }
-
-                // Favorites Stat Card
-                Card(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable { onNavigateToFavorites() },
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Column(
+                    // Orders Stat Card
+                    Card(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                            .weight(1f)
+                            .clickable { onNavigateToOrders() },
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                     ) {
-                        Box(
+                        Column(
                             modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFFFEE2E2)),
-                            contentAlignment = Alignment.Center
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Favorite,
-                                contentDescription = "Favorites",
-                                tint = Color(0xFFEF4444),
-                                modifier = Modifier.size(22.dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFFECFDF5)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ShoppingBag,
+                                    contentDescription = "Orders",
+                                    tint = Color(0xFF047857),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "$orderCount",
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = "My Orders",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF64748B)
                             )
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "$favoriteCount",
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF0F172A)
-                        )
-                        Text(
-                            text = "Favorites",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF64748B)
-                        )
+                    }
+
+                    // Favorites Stat Card
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onNavigateToFavorites() },
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFFFEE2E2)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Favorite,
+                                    contentDescription = "Favorites",
+                                    tint = Color(0xFFEF4444),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "$favoriteCount",
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = "Favorites",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF64748B)
+                            )
+                        }
                     }
                 }
             }
@@ -411,7 +562,7 @@ fun ProfileScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Contact & Delivery",
+                            text = if (user.role == UserRole.ADMIN) "Contact Information" else "Contact & Delivery",
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp,
                             color = Color(0xFF0F172A)
@@ -431,18 +582,22 @@ fun ProfileScreen(
                         iconBg = Color(0xFFEFF6FF),
                         iconTint = Color(0xFF2563EB),
                         label = "Phone Number",
-                        value = user.phone.ifBlank { "Add phone number" }
+                        value = user.phone.ifBlank { "Add phone number" },
+                        onClick = { showEditDialog = true }
                     )
 
-                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                    if (user.role != UserRole.ADMIN) {
+                        HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
 
-                    ModernProfileDetailRow(
-                        icon = Icons.Default.LocationOn,
-                        iconBg = Color(0xFFFEF3C7),
-                        iconTint = Color(0xFFD97706),
-                        label = "Default Address",
-                        value = user.address.ifBlank { "Set delivery address" }
-                    )
+                        ModernProfileDetailRow(
+                            icon = Icons.Default.LocationOn,
+                            iconBg = Color(0xFFFEF3C7),
+                            iconTint = Color(0xFFD97706),
+                            label = "Default Address",
+                            value = user.address.ifBlank { "Set delivery address" },
+                            onClick = { showSetAddressDialog = true }
+                        )
+                    }
                 }
             }
 
@@ -455,16 +610,18 @@ fun ProfileScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    ModernProfileOptionItem(
-                        icon = Icons.Default.NoFood,
-                        iconBg = Color(0xFFF3E8FF),
-                        iconTint = Color(0xFF7C3AED),
-                        title = "Dietary Preferences",
-                        subtitle = selectedDietary.joinToString(", ").ifEmpty { "None selected" },
-                        onClick = { showDietaryDialog = true }
-                    )
+                    if (user.role != UserRole.ADMIN) {
+                        ModernProfileOptionItem(
+                            icon = Icons.Default.NoFood,
+                            iconBg = Color(0xFFF3E8FF),
+                            iconTint = Color(0xFF7C3AED),
+                            title = "Dietary Preferences",
+                            subtitle = selectedDietary.joinToString(", ").ifEmpty { "None selected" },
+                            onClick = { showDietaryDialog = true }
+                        )
 
-                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                        HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                    }
 
                     ModernProfileOptionItem(
                         icon = Icons.AutoMirrored.Filled.HelpOutline,
@@ -641,20 +798,27 @@ fun ProfileScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
                     )
-                    OutlinedTextField(
-                        value = addressState,
-                        onValueChange = { addressState = it },
-                        label = { Text("Delivery Address") },
-                        colors = inputColors,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                    if (user.role != UserRole.ADMIN) {
+                        OutlinedTextField(
+                            value = addressState,
+                            onValueChange = { addressState = it },
+                            label = { Text("Delivery Address") },
+                            colors = inputColors,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                    }
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        onUpdateProfile(nameState, emailState, phoneState, addressState)
+                        onUpdateProfile(
+                            nameState,
+                            emailState,
+                            phoneState,
+                            if (user.role == UserRole.ADMIN) user.address else addressState
+                        )
                         showEditDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF047857)),
@@ -671,8 +835,107 @@ fun ProfileScreen(
         )
     }
 
+    // ─── Set / Edit Delivery Address Dialog ──────────────────────────────────
+    if (showSetAddressDialog) {
+        var tempAddress by remember(user.address) { mutableStateOf(user.address) }
+        val inputColors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = Color(0xFF0F172A),
+            unfocusedTextColor = Color(0xFF0F172A),
+            focusedContainerColor = Color.White,
+            unfocusedContainerColor = Color.White,
+            focusedBorderColor = Color(0xFF047857),
+            unfocusedBorderColor = Color(0xFFCBD5E1),
+            cursorColor = Color(0xFF047857)
+        )
+
+        AlertDialog(
+            onDismissRequest = { showSetAddressDialog = false },
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFFEF3C7)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LocationOn,
+                        contentDescription = null,
+                        tint = Color(0xFFD97706),
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            },
+            title = {
+                Text(
+                    text = if (user.address.isBlank()) "Set Delivery Address" else "Update Delivery Address",
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A),
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Enter your primary address so cooks and delivery partners can reach you accurately:",
+                        fontSize = 13.5.sp,
+                        color = Color(0xFF64748B),
+                        lineHeight = 18.sp
+                    )
+
+                    OutlinedTextField(
+                        value = tempAddress,
+                        onValueChange = { tempAddress = it },
+                        placeholder = { Text("e.g. 123 Green Street, Tech City, Apt 4B") },
+                        label = { Text("Delivery Address") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = inputColors,
+                        maxLines = 3,
+                        trailingIcon = {
+                            if (tempAddress.isNotBlank()) {
+                                IconButton(onClick = { tempAddress = "" }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Clear,
+                                        contentDescription = "Clear address",
+                                        tint = Color(0xFF94A3B8)
+                                    )
+                                }
+                            }
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = tempAddress.trim()
+                        if (trimmed.isNotBlank()) {
+                            onUpdateProfile(user.name, user.email, user.phone, trimmed)
+                            addressState = trimmed
+                            showSetAddressDialog = false
+                        }
+                    },
+                    enabled = tempAddress.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF047857)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Save Address", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSetAddressDialog = false }) {
+                    Text("Cancel", color = Color(0xFF64748B))
+                }
+            }
+        )
+    }
+
     // ─── Dietary Preferences Dialog ──────────────────────────────────────────
-    if (showDietaryDialog) {
+    if (showDietaryDialog && user.role != UserRole.ADMIN) {
         val dietaryOptions = listOf("Nut-Free", "Halal", "Vegetarian", "Gluten-Free", "Vegan", "Dairy-Free")
         AlertDialog(
             onDismissRequest = { showDietaryDialog = false },
@@ -1087,10 +1350,21 @@ private fun ModernProfileDetailRow(
     iconBg: Color,
     iconTint: Color,
     label: String,
-    value: String
+    value: String,
+    onClick: (() -> Unit)? = null
 ) {
+    val rowModifier = if (onClick != null) {
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onClick() }
+            .padding(vertical = 4.dp, horizontal = 2.dp)
+    } else {
+        Modifier.fillMaxWidth()
+    }
+
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = rowModifier,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -1121,8 +1395,25 @@ private fun ModernProfileDetailRow(
                 text = value,
                 fontSize = 14.5.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF0F172A)
+                color = if (value == "Set delivery address" || value == "Add phone number") Color(0xFF047857) else Color(0xFF0F172A)
             )
+        }
+
+        if (onClick != null) {
+            Surface(
+                shape = CircleShape,
+                color = Color(0xFFF1F5F9),
+                modifier = Modifier.size(28.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit $label",
+                        tint = Color(0xFF047857),
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
         }
     }
 }

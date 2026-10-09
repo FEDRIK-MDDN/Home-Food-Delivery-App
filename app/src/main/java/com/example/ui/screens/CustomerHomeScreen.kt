@@ -54,7 +54,8 @@ fun CustomerHomeScreen(
     onFavoriteClick: (String) -> Unit,
     onAddToCart: (Food) -> Unit,
     onOpenAiRecommendation: () -> Unit,
-    onOpenNotifications: () -> Unit
+    onOpenNotifications: () -> Unit,
+    onUpdateAddress: (String) -> Unit = {}
 ) {
     val categories = listOf(
         CategoryItem("Offers", "local_offer"),
@@ -68,6 +69,7 @@ fun CustomerHomeScreen(
     )
 
     var activeFilterPill by remember { mutableStateOf("GOTYOU") }
+    var showLocationDialog by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -93,7 +95,7 @@ fun CustomerHomeScreen(
                     // Location Header
                     Column(
                         modifier = Modifier
-                            .clickable { /* Change address dialog */ }
+                            .clickable { showLocationDialog = true }
                     ) {
                         Text(
                             text = "CURRENT LOCATION",
@@ -474,6 +476,104 @@ fun CustomerHomeScreen(
             }
 
             Spacer(modifier = Modifier.height(24.dp))
+        }
+
+        // ─── Set / Change Delivery Address Dialog ────────────────────────────
+        if (showLocationDialog) {
+            var tempAddress by remember(currentUserAddress) { mutableStateOf(currentUserAddress) }
+            val inputColors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color(0xFF0F172A),
+                unfocusedTextColor = Color(0xFF0F172A),
+                focusedContainerColor = Color.White,
+                unfocusedContainerColor = Color.White,
+                focusedBorderColor = GreenPrimary,
+                unfocusedBorderColor = Color(0xFFCBD5E1),
+                cursorColor = GreenPrimary
+            )
+
+            AlertDialog(
+                onDismissRequest = { showLocationDialog = false },
+                icon = {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFFEF3C7)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LocationOn,
+                            contentDescription = null,
+                            tint = Color(0xFFD97706),
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                },
+                title = {
+                    Text(
+                        text = if (currentUserAddress.isBlank()) "Set Delivery Address" else "Change Delivery Address",
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A),
+                        fontSize = 18.sp
+                    )
+                },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "Enter your primary address for food deliveries:",
+                            fontSize = 13.5.sp,
+                            color = Color(0xFF64748B),
+                            lineHeight = 18.sp
+                        )
+
+                        OutlinedTextField(
+                            value = tempAddress,
+                            onValueChange = { tempAddress = it },
+                            placeholder = { Text("e.g. 123 Green Street, Tech City, Apt 4B") },
+                            label = { Text("Delivery Address") },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = inputColors,
+                            maxLines = 3,
+                            trailingIcon = {
+                                if (tempAddress.isNotBlank()) {
+                                    IconButton(onClick = { tempAddress = "" }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Clear,
+                                            contentDescription = "Clear address",
+                                            tint = Color(0xFF94A3B8)
+                                        )
+                                    }
+                                }
+                            }
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val trimmed = tempAddress.trim()
+                            if (trimmed.isNotBlank()) {
+                                onUpdateAddress(trimmed)
+                                showLocationDialog = false
+                            }
+                        },
+                        enabled = tempAddress.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Save Address", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showLocationDialog = false }) {
+                        Text("Cancel", color = Color(0xFF64748B))
+                    }
+                }
+            )
         }
     }
 }

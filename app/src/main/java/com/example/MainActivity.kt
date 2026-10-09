@@ -168,7 +168,10 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
                         onFavoriteClick  = { viewModel.toggleFavorite(it) },
                         onAddToCart      = { viewModel.addToCart(it) },
                         onOpenAiRecommendation = { },
-                        onOpenNotifications    = { }
+                        onOpenNotifications    = { },
+                        onUpdateAddress        = { newAddr ->
+                            viewModel.repository.updateUserProfile(user.name, user.email, user.phone, newAddr)
+                        }
                     )
                 }
 
@@ -365,6 +368,9 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
                             UserRole.DELIVERY -> orders.count { it.deliveryId == user.userId }
                             UserRole.ADMIN    -> orders.size
                         },
+                        cookCount        = allUsers.count { it.role == UserRole.COOK },
+                        customerCount    = allUsers.count { it.role == UserRole.CUSTOMER },
+                        deliveryCount    = allUsers.count { it.role == UserRole.DELIVERY },
                         onUpdateProfile  = { name, email, phone, address ->
                             viewModel.repository.updateUserProfile(name, email, phone, address)
                         },
@@ -373,6 +379,7 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
                         },
                         onNavigateToFavorites = { viewModel.navigateTo("favorites") },
                         onNavigateToOrders    = { viewModel.navigateTo("orders") },
+                        onNavigateToPortal    = { viewModel.navigateTo("admin_dashboard") },
                         onLogout         = { viewModel.logout() }
                     )
                 }
