@@ -279,7 +279,7 @@ fun CartScreen(
                                         Icon(
                                             imageVector = Icons.Outlined.DeleteOutline,
                                             contentDescription = "Remove",
-                                            tint = CoralPrice,
+                                            tint = Color(0xFFDC2626),
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }
