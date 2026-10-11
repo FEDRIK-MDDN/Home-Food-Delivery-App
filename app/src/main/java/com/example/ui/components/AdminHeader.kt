@@ -39,14 +39,14 @@ fun AdminHeader(
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.primary,
-        shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp),
+        shape = RoundedCornerShape(24.dp),
         shadowElevation = 3.dp
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 20.dp)
+                .padding(start = 24.dp, end = 24.dp, top = 4.dp, bottom = 16.dp)
         ) {
             Text(
                 text = title,
