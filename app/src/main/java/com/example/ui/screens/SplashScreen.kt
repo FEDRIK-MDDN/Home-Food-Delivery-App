@@ -15,6 +15,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import com.example.ui.theme.DarkPill
 import com.example.ui.theme.GreenPrimary
 
@@ -42,24 +46,26 @@ fun SplashScreen(
                 modifier = Modifier.padding(top = 24.dp)
             )
 
-            // Center Chef Graphic Card (Matching uploaded UI image 1 left screen)
+            // Center Chef Graphic Card with user's created app logo
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(300.dp),
                 shape = RoundedCornerShape(32.dp),
                 colors = CardDefaults.cardColors(containerColor = GreenPrimary),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Restaurant,
-                        contentDescription = "Master Chef",
-                        tint = Color.White,
-                        modifier = Modifier.size(120.dp)
+                    Image(
+                        painter = painterResource(id = R.drawable.appicon),
+                        contentDescription = "App Logo",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(32.dp)),
+                        contentScale = ContentScale.Crop
                     )
                 }
             }

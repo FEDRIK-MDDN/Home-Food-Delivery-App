@@ -26,6 +26,10 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import com.example.data.model.UserRole
 import com.example.ui.theme.GreenPrimary
 
@@ -114,24 +118,14 @@ fun AuthScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // ── Logo ──────────────────────────────────────────────────────────
-            Box(
+            Image(
+                painter = painterResource(id = R.drawable.appicon),
+                contentDescription = "HomeChef Logo",
                 modifier = Modifier
-                    .size(72.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(
-                        Brush.linearGradient(
-                            listOf(Color(0xFF10B981), Color(0xFF047857))
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.RestaurantMenu,
-                    contentDescription = "Logo",
-                    tint = Color.White,
-                    modifier = Modifier.size(40.dp)
-                )
-            }
+                    .size(76.dp)
+                    .clip(RoundedCornerShape(22.dp)),
+                contentScale = ContentScale.Crop
+            )
 
             Spacer(modifier = Modifier.height(20.dp))
 
