@@ -67,7 +67,7 @@ fun FavoritesScreen(
                         text = "No Favorite Dishes Yet",
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp,
-                        color = Color(0xFF1E293B)
+                        color = GreenPrimary
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
