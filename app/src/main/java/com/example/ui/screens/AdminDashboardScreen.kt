@@ -204,7 +204,7 @@ fun AdminDashboardScreen(
             if (selectedTab == "Pending Cooks") {
                 if (pendingCooks.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("No pending cook applications!", fontWeight = FontWeight.Bold, color = Color(0xFF64748B))
+                        Text("No pending cook applications!", fontWeight = FontWeight.Bold, color = GreenPrimary)
                     }
                 } else {
                     LazyColumn(
