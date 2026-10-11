@@ -586,7 +586,7 @@ fun ProfileScreen(
                         onClick = { showEditDialog = true }
                     )
 
-                    if (user.role != UserRole.ADMIN) {
+                    if (user.role != UserRole.ADMIN && user.role != UserRole.DELIVERY) {
                         HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
 
                         ModernProfileDetailRow(
@@ -610,7 +610,7 @@ fun ProfileScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    if (user.role != UserRole.ADMIN) {
+                    if (user.role != UserRole.ADMIN && user.role != UserRole.DELIVERY) {
                         ModernProfileOptionItem(
                             icon = Icons.Default.NoFood,
                             iconBg = Color(0xFFF3E8FF),
@@ -935,7 +935,7 @@ fun ProfileScreen(
     }
 
     // ─── Dietary Preferences Dialog ──────────────────────────────────────────
-    if (showDietaryDialog && user.role != UserRole.ADMIN) {
+    if (showDietaryDialog && user.role != UserRole.ADMIN && user.role != UserRole.DELIVERY) {
         val dietaryOptions = listOf("Nut-Free", "Halal", "Vegetarian", "Gluten-Free", "Vegan", "Dairy-Free")
         AlertDialog(
             onDismissRequest = { showDietaryDialog = false },
