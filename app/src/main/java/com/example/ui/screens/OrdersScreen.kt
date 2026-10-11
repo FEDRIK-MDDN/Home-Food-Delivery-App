@@ -206,7 +206,7 @@ fun OrdersScreen(
                             text = "No \"$selectedTab\" Orders",
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp,
-                            color = Color(0xFF1E293B)
+                            color = GreenPrimary
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
@@ -217,7 +217,7 @@ fun OrdersScreen(
                                 UserRole.ADMIN    -> "No orders match this filter"
                             },
                             fontSize = 13.sp,
-                            color = Color(0xFF94A3B8)
+                            color = Color(0xFF64748B)
                         )
                     }
                 }

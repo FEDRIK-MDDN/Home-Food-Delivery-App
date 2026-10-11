@@ -159,13 +159,13 @@ fun CartScreen(
                         text = "Your cart is empty",
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp,
-                        color = Color(0xFF1E1E1E)
+                        color = GreenPrimary
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = "Explore local home cooks and add meals!",
                         fontSize = 13.sp,
-                        color = Color(0xFF737880)
+                        color = Color(0xFF64748B)
                     )
                 }
             }
@@ -279,7 +279,7 @@ fun CartScreen(
                                         Icon(
                                             imageVector = Icons.Outlined.DeleteOutline,
                                             contentDescription = "Remove",
-                                            tint = CoralPrice,
+                                            tint = Color(0xFFDC2626),
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }
