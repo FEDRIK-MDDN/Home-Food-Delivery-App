@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import com.example.data.model.OrderStatus
 import com.example.data.model.UserRole
 import com.example.ui.components.HomeChefBottomNavBar
 import com.example.ui.screens.*
@@ -371,6 +372,11 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
                         cookCount        = allUsers.count { it.role == UserRole.COOK },
                         customerCount    = allUsers.count { it.role == UserRole.CUSTOMER },
                         deliveryCount    = allUsers.count { it.role == UserRole.DELIVERY },
+                        submittedIssuesCount = deliveryIssues.count { it.driverId == user.userId },
+                        completedRoutesCount = orders.count {
+                            (it.deliveryId == user.userId || ((it.deliveryPartnerName?.contains(user.name, ignoreCase = true) == true) && !it.deliveryId.isNullOrEmpty())) &&
+                            (it.status == OrderStatus.DELIVERED || it.status == OrderStatus.COMPLETED)
+                        },
                         onUpdateProfile  = { name, email, phone, address ->
                             viewModel.repository.updateUserProfile(name, email, phone, address)
                         },
@@ -379,6 +385,7 @@ fun MainAppScreen(viewModel: HomeChefViewModel) {
                         },
                         onNavigateToFavorites = { viewModel.navigateTo("favorites") },
                         onNavigateToOrders    = { viewModel.navigateTo("orders") },
+                        onNavigateToIssues    = { viewModel.navigateTo("delivery_issues") },
                         onNavigateToPortal    = { viewModel.navigateTo("admin_dashboard") },
                         onLogout         = { viewModel.logout() }
                     )
