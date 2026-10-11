@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.Order
 import com.example.data.model.User
 import com.example.data.model.UserRole
+import com.example.ui.components.AdminHeader
 import com.example.ui.theme.GreenContainer
 import com.example.ui.theme.GreenPrimary
 
@@ -81,27 +82,9 @@ fun AdminDashboardScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "Admin Dashboard",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "System Controller",
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = GreenPrimary,
-                    titleContentColor = Color.White
-                )
+            AdminHeader(
+                title = "Admin Portal",
+                subtitle = "System Controller"
             )
         },
         floatingActionButton = {
