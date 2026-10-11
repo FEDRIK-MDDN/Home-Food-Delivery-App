@@ -28,11 +28,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Order
 import com.example.data.model.User
 import com.example.data.model.UserRole
+import com.example.ui.components.AdminHeader
 import com.example.ui.theme.GreenContainer
 import com.example.ui.theme.GreenPrimary
 
@@ -80,24 +82,9 @@ fun AdminDashboardScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "Admin Portal",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp,
-                            color = Color(0xFF0F172A)
-                        )
-                        Text(
-                            text = "System Controller",
-                            fontSize = 12.sp,
-                            color = GreenPrimary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+            AdminHeader(
+                title = "Admin Portal",
+                subtitle = "System Controller"
             )
         },
         floatingActionButton = {
@@ -130,16 +117,29 @@ fun AdminDashboardScreen(
                     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
                 ) {
                     Column(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 14.dp, horizontal = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
                         Text(
                             text = "$${String.format("%.2f", totalRevenue)}",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = GreenPrimary
+                            color = GreenPrimary,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        Text(text = "Volume", fontSize = 11.sp, color = Color(0xFF64748B))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Volume",
+                            fontSize = 11.sp,
+                            color = Color(0xFF64748B),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
 
@@ -150,16 +150,29 @@ fun AdminDashboardScreen(
                     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
                 ) {
                     Column(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 14.dp, horizontal = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
                         Text(
                             text = "${users.size}",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF0F172A)
+                            color = Color(0xFF0F172A),
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        Text(text = "Users", fontSize = 11.sp, color = Color(0xFF64748B))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Users",
+                            fontSize = 11.sp,
+                            color = Color(0xFF64748B),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
 
@@ -170,16 +183,29 @@ fun AdminDashboardScreen(
                     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
                 ) {
                     Column(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 14.dp, horizontal = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
                         Text(
                             text = "${pendingCooks.size}",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFFD97706)
+                            color = Color(0xFFD97706),
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        Text(text = "Pending", fontSize = 11.sp, color = Color(0xFF64748B))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Pending",
+                            fontSize = 11.sp,
+                            color = Color(0xFF64748B),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             }
@@ -204,7 +230,7 @@ fun AdminDashboardScreen(
             if (selectedTab == "Pending Cooks") {
                 if (pendingCooks.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("No pending cook applications!", fontWeight = FontWeight.Bold, color = Color(0xFF64748B))
+                        Text("No pending cook applications!", fontWeight = FontWeight.Bold, color = GreenPrimary)
                     }
                 } else {
                     LazyColumn(

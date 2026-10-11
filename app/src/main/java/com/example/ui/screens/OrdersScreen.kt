@@ -27,6 +27,7 @@ import com.example.data.model.Order
 import com.example.data.model.OrderStatus
 import com.example.data.model.User
 import com.example.data.model.UserRole
+import com.example.ui.components.AdminHeader
 import com.example.ui.components.CancelDeliveryDialog
 import com.example.ui.components.CustomerDeleteOrderDialog
 import com.example.ui.components.CustomerEditOrderDialog
@@ -127,29 +128,36 @@ fun OrdersScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = "$screenTitle (${filteredOrders.size})",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp,
-                            color = Color(0xFF0F172A)
-                        )
-                        Text(
-                            text = when (currentUser.role) {
-                                UserRole.CUSTOMER -> "Track your placed orders"
-                                UserRole.COOK     -> "Orders coming into your kitchen"
-                                UserRole.DELIVERY -> "Your claimed delivery trips"
-                                UserRole.ADMIN    -> "Platform-wide order overview"
-                            },
-                            fontSize = 12.sp,
-                            color = Color(0xFF64748B)
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
-            )
+            if (currentUser.role == UserRole.ADMIN) {
+                AdminHeader(
+                    title = "Orders",
+                    subtitle = "System Controller"
+                )
+            } else {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                text = "$screenTitle (${filteredOrders.size})",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 20.sp,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = when (currentUser.role) {
+                                    UserRole.CUSTOMER -> "Track your placed orders"
+                                    UserRole.COOK     -> "Orders coming into your kitchen"
+                                    UserRole.DELIVERY -> "Your claimed delivery trips"
+                                    UserRole.ADMIN    -> "Platform-wide order overview"
+                                },
+                                fontSize = 12.sp,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                )
+            }
         },
         containerColor = Color(0xFFF8FAF8)
     ) { padding ->
