@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -26,6 +27,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1498,10 +1500,11 @@ fun AddDishDialog(
 ) {
     var title by remember { mutableStateOf("") }
     var titleError by remember { mutableStateOf(false) }
+    var priceError by remember { mutableStateOf(false) }
     var description by remember { mutableStateOf("") }
-    var price by remember { mutableStateOf("8.50") }
-    var category by remember { mutableStateOf("Biryani") }
-    var prepTime by remember { mutableStateOf("25") }
+    var price by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("") }
+    var prepTime by remember { mutableStateOf("") }
     var selectedImageUri by remember { mutableStateOf<String?>(null) }
     var customImageUrl by remember { mutableStateOf("") }
     var isImageConverting by remember { mutableStateOf(false) }
@@ -1645,6 +1648,7 @@ fun AddDishDialog(
                         if (it.isNotBlank()) titleError = false
                     },
                     label = { Text("Dish Title *") },
+                    placeholder = { Text("e.g. Royal Chicken Biryani") },
                     isError = titleError,
                     supportingText = if (titleError) {
                         { Text("Dish title is required", color = Color.Red) }
@@ -1656,12 +1660,25 @@ fun AddDishDialog(
                     value = description,
                     onValueChange = { description = it },
                     label = { Text("Description") },
+                    placeholder = { Text("Short description of ingredients, flavor, spice level...") },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = price,
-                    onValueChange = { price = it },
-                    label = { Text("Price ($)") },
+                    onValueChange = { input ->
+                        val filtered = input.filter { it.isDigit() || it == '.' }
+                        if (filtered.count { it == '.' } <= 1) {
+                            price = filtered
+                            if (filtered.isNotBlank()) priceError = false
+                        }
+                    },
+                    label = { Text("Price ($) *") },
+                    placeholder = { Text("e.g. 8.50") },
+                    isError = priceError,
+                    supportingText = if (priceError) {
+                        { Text("Valid price is required (e.g. 8.50)", color = Color.Red) }
+                    } else null,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1669,13 +1686,18 @@ fun AddDishDialog(
                     value = category,
                     onValueChange = { category = it },
                     label = { Text("Category") },
+                    placeholder = { Text("e.g. Biryani, Asian, Curry, Healthy") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = prepTime,
-                    onValueChange = { prepTime = it },
+                    onValueChange = { input ->
+                        prepTime = input.filter { it.isDigit() }.take(4)
+                    },
                     label = { Text("Prep Time (Mins)") },
+                    placeholder = { Text("e.g. 25") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1684,8 +1706,11 @@ fun AddDishDialog(
         confirmButton = {
             Button(
                 onClick = {
+                    val parsedPrice = price.toDoubleOrNull()
                     if (title.isBlank()) {
                         titleError = true
+                    } else if (parsedPrice == null || parsedPrice <= 0.0) {
+                        priceError = true
                     } else {
                         val finalImage = selectedImageUri
                             ?: customImageUrl.ifBlank { null }
@@ -1704,7 +1729,7 @@ fun AddDishDialog(
                             isCookVerified = isApprovedCook,
                             title = title.trim(),
                             description = description.trim(),
-                            price = price.toDoubleOrNull() ?: 8.50,
+                            price = parsedPrice,
                             category = category.trim().ifBlank { "Homemade" },
                             imageUrl = finalImage,
                             preparationTimeMins = prepTime.toIntOrNull() ?: 20,
